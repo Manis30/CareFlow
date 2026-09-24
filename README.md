@@ -38,7 +38,6 @@ CareFlow supports multiple user roles:
 
 - **Super Admin**
 - **Organization Admin**
-- **Receptionist**
 - **Doctor**
 - **Patient**
 
@@ -57,18 +56,6 @@ Each role has its own permissions, workflows, dashboards, and responsibilities.
 - Appointment status updates
 - Doctor-patient communication
 - Video consultation support
-
----
-
-## 🧑‍💼 Receptionist Features
-
-- Appointment queue management
-- Patient registration
-- Appointment scheduling
-- Payment verification
-- Appointment completion
-- Doctor availability management
-- Patient assistance
 
 ---
 
