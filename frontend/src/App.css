@@ -1,0 +1,6 @@
+/* CareFlow Application Global Style Extensions */
+.app-container {
+  min-height: 100vh;
+  background-color: var(--color-neutral-bg);
+  color: var(--color-ink);
+}

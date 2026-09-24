@@ -1,0 +1,41 @@
+{
+  "name": "careflow-backend",
+  "version": "1.0.0",
+  "description": "CareFlow Healthcare platform",
+  "main": "src/server.js",
+  "type": "module",
+  "scripts": {
+    "dev": "nodemon src/server.js",
+    "start":"node src/server.js"
+  },
+  "keywords": [
+    "Healthcare",
+    "Appointment",
+    "Medical"
+  ],
+  "author": "Mani",
+  "license": "ISC",
+  "dependencies": {
+    "@google/genai": "^2.21.0",
+    "bcrypt": "^6.0.0",
+    "chrono-node": "^2.10.1",
+    "cloudinary": "^2.10.1",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.7.0",
+    "helmet": "^8.3.0",
+    "jsonwebtoken": "^9.0.3",
+    "mongoose": "^9.9.2",
+    "morgan": "^1.11.0",
+    "multer": "^2.2.0",
+    "nodemon": "^3.1.14",
+    "puppeteer-core": "^25.10.0",
+    "razorpay": "^2.9.8",
+    "socket.io": "^4.8.3",
+    "streamifier": "^0.1.1",
+    "tesseract.js": "^7.0.0",
+    "zod": "^4.5.4"
+  }
+}

@@ -1,0 +1,185 @@
+@import "react-toastify/dist/ReactToastify.css";
+@import "tailwindcss";
+
+@theme {
+  --font-sans: 'Poppins', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+
+  /* DomoApp Blue Brand Identity */
+  --color-primary-blue: #2563EB;
+  --color-primary-blue-hover: #1D4ED8;
+  --color-primary-blue-light: #EFF6FF;
+  --color-clinical-blue: #0284C7;
+  --color-sky-accent: #38BDF8;
+  --color-deep-blue: #173B57;
+
+  /* Neutrals / Slate */
+  --color-slate-950: #020617;
+  --color-slate-900: #0F172A;
+  --color-slate-800: #1E293B;
+  --color-slate-700: #334155;
+  --color-slate-600: #475569;
+  --color-slate-500: #64748B;
+  --color-slate-400: #94A3B8;
+  --color-slate-300: #CBD5E1;
+  --color-slate-200: #E2E8F0;
+  --color-slate-100: #F1F5F9;
+  --color-slate-50: #F8FAFC;
+
+  /* Semantics (Strictly Functional) */
+  --color-success: #10B981;
+  --color-success-bg: #ECFDF5;
+  --color-warning: #F59E0B;
+  --color-warning-bg: #FFFBEB;
+  --color-danger: #EF4444;
+  --color-danger-bg: #FEF2F2;
+  --color-emergency: #DC2626;
+  --color-ai-accent: #6366F1;
+  --color-ai-bg: #EEF2FF;
+}
+
+:root {
+  --font-sans: 'Poppins', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+
+  /* DomoApp Geometry Hierarchy */
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-2xl: 24px;
+  --radius-full: 9999px;
+
+  /* DomoApp Elevation System */
+  --shadow-2xs: 0 1px 2px 0 rgba(15, 23, 42, 0.03);
+  --shadow-xs: 0 1px 3px 0 rgba(15, 23, 42, 0.05), 0 1px 2px -1px rgba(15, 23, 42, 0.03);
+  --shadow-sm: 0 2px 4px 0 rgba(15, 23, 42, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(15, 23, 42, 0.06), 0 2px 4px -2px rgba(15, 23, 42, 0.04);
+  --shadow-lg: 0 10px 15px -3px rgba(15, 23, 42, 0.08), 0 4px 6px -4px rgba(15, 23, 42, 0.04);
+}
+
+@layer base {
+  body {
+    font-family: var(--font-sans);
+    background-color: #F7F9FC;
+    color: #0F172A;
+    @apply antialiased min-h-screen selection:bg-blue-600 selection:text-white;
+  }
+
+  /* Accessible clinical focus indicator */
+  :focus-visible {
+    outline: 2px solid #2563EB;
+    outline-offset: 2px;
+  }
+}
+
+/* Custom Toastify Overrides */
+.Toastify__toast-container {
+  font-family: var(--font-sans) !important;
+  font-size: 0.8125rem !important;
+}
+
+.Toastify__toast {
+  border-radius: var(--radius-sm) !important;
+  box-shadow: var(--shadow-xs) !important;
+  padding: 12px 16px !important;
+}
+
+/* DomoApp Clean Thin Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #F8FAFC;
+}
+::-webkit-scrollbar-thumb {
+  background: #CBD5E1;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94A3B8;
+}
+
+/* DomoApp Table Utility Styles */
+.app-table-container {
+  background-color: #FFFFFF;
+  border-radius: var(--radius-md);
+  border: 1px solid #E2E8F0;
+  box-shadow: var(--shadow-2xs);
+  overflow: hidden;
+}
+
+.app-table-head {
+  background-color: #F8FAFC;
+  border-bottom: 1px solid #E2E8F0;
+}
+
+.app-table-th {
+  color: #64748B;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.75rem 1rem;
+}
+
+.app-table-row {
+  transition: background-color 0.15s ease-in-out;
+}
+
+.app-table-row:hover {
+  background-color: #F8FAFC;
+}
+
+.app-table-td {
+  padding: 0.875rem 1rem;
+  vertical-align: middle;
+  border-bottom: 1px solid #F1F5F9;
+  color: #334155;
+  font-size: 0.8125rem;
+}
+
+/* CareFlow Card System */
+.careflow-card {
+  background-color: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-2xs);
+}
+
+/* CareFlow Recharts Overrides */
+.recharts-default-tooltip {
+  border-radius: 8px !important;
+  border: 1px solid #E2E8F0 !important;
+  box-shadow: 0 4px 12px -2px rgba(15, 23, 42, 0.08) !important;
+  font-family: var(--font-sans) !important;
+  font-size: 12px !important;
+  padding: 8px 12px !important;
+}
+
+.recharts-cartesian-axis-tick text {
+  font-family: var(--font-sans) !important;
+  font-size: 11px !important;
+  fill: #64748B !important;
+}
+
+.recharts-cartesian-grid line {
+  stroke: #F1F5F9 !important;
+}
+
+.recharts-legend-item-text {
+  font-family: var(--font-sans) !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  color: #475569 !important;
+}
+
+/* Reduced-motion compliance */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

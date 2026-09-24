@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" fill="none">
+  <defs>
+    <!-- Background Gradient: Clinical Blue to Indigo Depth -->
+    <linearGradient id="careflow-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3B82F6" />
+      <stop offset="50%" stop-color="#2563EB" />
+      <stop offset="100%" stop-color="#1D4ED8" />
+    </linearGradient>
+
+    <!-- Subtle Luminous Inset Gradient -->
+    <linearGradient id="careflow-inset" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.35" />
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.05" />
+    </linearGradient>
+
+    <!-- Heart Soft Ambient Glow / Fill -->
+    <linearGradient id="careflow-heart-fill" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.2" />
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.08" />
+    </linearGradient>
+  </defs>
+
+  <!-- Squircle App Badge Container -->
+  <rect width="64" height="64" rx="16" fill="url(#careflow-bg)" />
+
+  <!-- Subtle Specular Inset Border for Razor-Sharp Edge Definition -->
+  <rect x="1" y="1" width="62" height="62" rx="15" fill="none" stroke="url(#careflow-inset)" stroke-width="1.5" />
+
+  <!-- CareFlow Brand Icon: HeartPulse (Compassion + Flow/Vitals) -->
+  <g transform="translate(10, 10) scale(1.8333)">
+    <!-- Heart Silhouette with Glassmorphic Translucent Fill & Solid White Stroke -->
+    <path
+      d="M2 9.5a5.5 5.5 0 0 1 9.591-3.676.56.56 0 0 0 .818 0A5.49 5.49 0 0 1 22 9.5c0 2.29-1.5 4-3 5.5l-5.492 5.313a2 2 0 0 1-3 .019L5 15c-1.5-1.5-3-3.2-3-5.5Z"
+      fill="url(#careflow-heart-fill)"
+      stroke="#FFFFFF"
+      stroke-width="2.3"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+    
+    <!-- Dynamic ECG Pulse Wave Line -->
+    <path
+      d="M3.22 13H9.5l.5-1 2 4.5 2-7 1.5 3.5h5.27"
+      fill="none"
+      stroke="#FFFFFF"
+      stroke-width="2.5"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+  </g>
+</svg>
