@@ -37,14 +37,14 @@ export const registerController = async (req, res) => {
     if (result.accessToken && result.refreshToken) {
         res.cookie('accessToken', result.accessToken, {
             httpOnly: true,
-            secure: false,
-            sameSite: 'lax',
+            secure: true,
+            sameSite: 'none',
             maxAge: 15 * 60 * 1000
         });
         res.cookie('refreshToken', result.refreshToken, {
             httpOnly: true,
-            secure: false,
-            sameSite: 'lax',
+            secure: true,
+            sameSite: 'none',
             maxAge: 30 * 24 * 60 * 60 * 1000
         });
     }
@@ -65,18 +65,19 @@ export const registerController = async (req, res) => {
 export const loginController = async (req, res) => {
     const { email, password } = req.body;
     const result = await loginService(email, password);
-    res.cookie('accessToken', result.accessToken, {
-        httpOnly: true,
-        secure: false,
-        sameSite: 'lax',
-        maxAge: 15 * 60 * 1000
-    });
-    res.cookie('refreshToken', result.refreshToken, {
-        httpOnly: true,
-        secure: false,
-        sameSite: 'lax',
-        maxAge: 30 * 24 * 60 * 60 * 1000
-    });
+   res.cookie('accessToken', result.accessToken, {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'none',
+    maxAge: 15 * 60 * 1000
+});
+
+res.cookie('refreshToken', result.refreshToken, {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'none',
+    maxAge: 30 * 24 * 60 * 60 * 1000
+});
     res.status(200).json({ success: true, data: sanitizeUser(result.updatedUser) });
 };
 
@@ -85,14 +86,14 @@ export const refreshController = async (req, res) => {
     const result = await refreshService(refreshToken);
     res.cookie('accessToken', result.accessToken, {
         httpOnly: true,
-        secure: false,
-        sameSite: 'lax',
+        secure: true,
+        sameSite: 'none',
         maxAge: 15 * 60 * 1000
     });
     res.cookie('refreshToken', result.refreshToken, {
         httpOnly: true,
-        secure: false,
-        sameSite: 'lax',
+        secure: true,
+        sameSite: 'none',
         maxAge: 30 * 24 * 60 * 60 * 1000
     });
     res.status(200).json({ success: true, message: "Access Token created", data: sanitizeUser(result.updatedUser) });

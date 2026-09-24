@@ -18,6 +18,7 @@ import aiRoute from './route/ai.js';
 import notificationRoute from './route/notification.js';
 import errorHandler from './middleware/errorHandler.js';
 const app=express()
+console.log("check url", process.env.CLIENT_URL)
 app.use(cors({
     origin: process.env.CLIENT_URL || 'http://localhost:5173',
     credentials: true
