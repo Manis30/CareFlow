@@ -93,44 +93,50 @@ const SuperAdminDoctorDetailsPage = () => {
 
   if (error) {
     return (
-      <div className="py-8 space-y-4">
-        <ErrorState message={error} onRetry={fetchDoctorDetails} />
-        <div className="flex justify-center">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => navigate('/super-admin/doctors')}
-            icon={ArrowLeft}
-          >
-            Back to Doctors
-          </Button>
+      <ContentContainer maxWidth="7xl">
+        <div className="py-8 space-y-4">
+          <ErrorState message={error} onRetry={fetchDoctorDetails} />
+          <div className="flex justify-center">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate('/super-admin/doctors')}
+              icon={ArrowLeft}
+            >
+              Back to Doctors
+            </Button>
+          </div>
         </div>
-      </div>
+      </ContentContainer>
     );
   }
 
   if (!doctor) {
     return (
-      <div className="py-8">
-        <EmptyState
-          title="Doctor Not Found"
-          description="The requested doctor profile does not exist or was removed."
-          actionText="Back to Doctors"
-          onAction={() => navigate('/super-admin/doctors')}
-        />
-      </div>
+      <ContentContainer maxWidth="7xl">
+        <div className="py-8">
+          <EmptyState
+            title="Doctor Not Found"
+            description="The requested doctor profile does not exist or was removed."
+            actionText="Back to Doctors"
+            onAction={() => navigate('/super-admin/doctors')}
+          />
+        </div>
+      </ContentContainer>
     );
   }
 
   return (
-    <DoctorDetailsContent
-      doctor={doctor}
-      appointments={appointments}
-      stats={stats}
-      breadcrumbCategory="Platform Operations"
-      backRoute="/super-admin/doctors"
-      onViewAllAppointments={() => navigate('/super-admin/appointments')}
-    />
+    <ContentContainer maxWidth="7xl">
+      <DoctorDetailsContent
+        doctor={doctor}
+        appointments={appointments}
+        stats={stats}
+        breadcrumbCategory="Platform Operations"
+        backRoute="/super-admin/doctors"
+        onViewAllAppointments={() => navigate('/super-admin/appointments')}
+      />
+    </ContentContainer>
   );
 };
 
