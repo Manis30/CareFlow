@@ -89,7 +89,7 @@ route.get(
 route.get(
     "/:id",
     authentication,
-    authorization("organization_admin", "admin", "super_admin"),
+    authorization("organization_admin", "admin", "super_admin", "patient", "doctor"),
     getDoctorController
 );
 

@@ -19,7 +19,7 @@ import ErrorState from '../../components/common/ErrorState';
 import Button from '../../components/common/Button';
 import ContentContainer from '../../components/layout/ContentContainer';
 import PageHeader from '../../components/layout/PageHeader';
-import { formatCurrency } from '../../utils/formatters';
+import { formatCurrency, formatDoctorName } from '../../utils/formatters';
 import { resolveProfileImage } from '../../utils/resolveProfileImage';
 
 export const PatientDoctorDetails = () => {
@@ -76,7 +76,8 @@ export const PatientDoctorDetails = () => {
 
   if (!doctor) return null;
 
-  const doctorName = doctor.userId?.name || doctor.name || 'Doctor';
+  const rawDoctorName = doctor.userId?.name || doctor.name || 'Doctor';
+  const doctorName = formatDoctorName(rawDoctorName, 'Doctor');
   const specialty = doctor.specialization || doctor.specialty || 'General Medicine';
   const clinicName = doctor.organizationId?.name || doctor.clinicName || 'CareFlow Clinic';
   const qualification = doctor.qualification || 'MBBS, MD';
@@ -88,7 +89,7 @@ export const PatientDoctorDetails = () => {
   return (
     <ContentContainer maxWidth="5xl" className="space-y-6 pb-12">
       <PageHeader
-        title={doctorName.startsWith('Dr.') ? doctorName : `Dr. ${doctorName}`}
+        title={doctorName}
         subtitle={`${specialty} · ${clinicName}`}
         badge={
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 text-blue-700 font-extrabold text-[11px] tracking-wide border border-blue-100">
@@ -135,7 +136,7 @@ export const PatientDoctorDetails = () => {
               </div>
               <div className="space-y-1 min-w-0">
                 <h2 className="text-xl font-black text-slate-900 tracking-tight">
-                  {doctorName.startsWith('Dr.') ? doctorName : `Dr. ${doctorName}`}
+                  {doctorName}
                 </h2>
                 <p className="text-xs font-bold text-blue-600">{specialty}</p>
                 <p className="text-xs text-slate-500 flex items-center gap-1.5 pt-0.5 font-medium">
@@ -152,7 +153,7 @@ export const PatientDoctorDetails = () => {
               </h3>
               <p className="text-xs sm:text-sm text-slate-600 leading-relaxed font-medium">
                 {doctor.bio ||
-                  `Dr. ${doctorName} is an accredited physician specializing in ${specialty} at ${clinicName}, providing diagnostic and patient consultation care adhering to hospital clinical protocols.`}
+                  `${doctorName} is an accredited physician specializing in ${specialty} at ${clinicName}, providing diagnostic and patient consultation care adhering to hospital clinical protocols.`}
               </p>
             </div>
 

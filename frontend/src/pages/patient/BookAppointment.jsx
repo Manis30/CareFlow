@@ -75,6 +75,23 @@ const normalizeDoctor = (rawDoc) => {
   };
 };
 
+const getTodayString = () => {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+
+const getTomorrowString = () => {
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const y = tomorrow.getFullYear();
+  const m = String(tomorrow.getMonth() + 1).padStart(2, '0');
+  const d = String(tomorrow.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+
 export const PatientBookAppointment = () => {
   const [searchParams] = useSearchParams();
   const initialDoctorId = searchParams.get('doctorId') || '';
@@ -84,11 +101,7 @@ export const PatientBookAppointment = () => {
   const [selectedDoctor, setSelectedDoctor] = useState(null);
 
   const [consultationType, setConsultationType] = useState('online');
-  const [appointmentDate, setAppointmentDate] = useState(() => {
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    return tomorrow.toISOString().split('T')[0];
-  });
+  const [appointmentDate, setAppointmentDate] = useState(() => getTomorrowString());
 
   const [availableSlots, setAvailableSlots] = useState([]);
   const [selectedSlot, setSelectedSlot] = useState(null);
@@ -108,9 +121,24 @@ export const PatientBookAppointment = () => {
     fetchDoctors();
   }, []);
 
+  // When selected doctor changes, fetch fresh details
   useEffect(() => {
     if (selectedDoctorId) {
+      const match = doctors.find((d) => d._id === selectedDoctorId);
+      if (match) {
+        setSelectedDoctor(match);
+      }
       fetchDoctorDetails(selectedDoctorId);
+    }
+  }, [selectedDoctorId]);
+
+  // When doctor or date changes, fetch actual slots from backend!
+  useEffect(() => {
+    if (selectedDoctorId && appointmentDate) {
+      fetchAvailableSlots(selectedDoctorId, appointmentDate);
+    } else {
+      setAvailableSlots([]);
+      setSelectedSlot(null);
     }
   }, [selectedDoctorId, appointmentDate]);
 
@@ -122,8 +150,11 @@ export const PatientBookAppointment = () => {
       const normalized = list.map(normalizeDoctor).filter(Boolean);
       setDoctors(normalized);
 
-      if (normalized.length > 0 && !selectedDoctorId) {
-        setSelectedDoctorId(normalized[0]._id);
+      const targetId = selectedDoctorId || initialDoctorId || (normalized[0] ? normalized[0]._id : '');
+      if (targetId) {
+        setSelectedDoctorId(targetId);
+        const match = normalized.find((d) => d._id === targetId);
+        if (match) setSelectedDoctor(match);
       }
     } catch {
       setDoctors([]);
@@ -139,29 +170,40 @@ export const PatientBookAppointment = () => {
       if (docData) {
         const norm = normalizeDoctor(docData);
         setSelectedDoctor(norm);
-        fetchAvailableSlots(docId, appointmentDate);
       }
     } catch {
-      // Handled
+      // Handled: doctor from list is already set
     }
   };
 
   const fetchAvailableSlots = async (docId, dateStr) => {
+    if (!docId || !dateStr) return;
     try {
       setSlotsLoading(true);
       setSlotReason('');
-      const res = await getDoctorAvailableSlotsApi(docId, dateStr);
-      const slotsData = res.data?.slots || [];
-      setAvailableSlots(slotsData);
       setSelectedSlot(null);
+      const res = await getDoctorAvailableSlotsApi(docId, dateStr);
+      const payload = res.data || res;
+      const slotsData = Array.isArray(payload)
+        ? payload
+        : Array.isArray(payload?.slots)
+        ? payload.slots
+        : [];
+      setAvailableSlots(slotsData);
 
       if (slotsData.length === 0) {
-        setSlotReason(res.data?.reason || 'No appointment slots available on this date.');
+        setSlotReason(
+          payload?.reason ||
+          'No time slots available for this date. Please pick an alternative date.'
+        );
       }
-    } catch {
+    } catch (err) {
       setAvailableSlots([]);
       setSelectedSlot(null);
-      setSlotReason('No appointment slots available on this date.');
+      setSlotReason(
+        err?.response?.data?.message ||
+        'No appointment slots available on this date. Please pick an alternative date.'
+      );
     } finally {
       setSlotsLoading(false);
     }
@@ -171,13 +213,13 @@ export const PatientBookAppointment = () => {
     return new Promise((resolve) => {
       if (window.Razorpay) {
         resolve(true);
-        return;
+      } else {
+        const script = document.createElement('script');
+        script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+        script.onload = () => resolve(true);
+        script.onerror = () => resolve(false);
+        document.body.appendChild(script);
       }
-      const script = document.createElement('script');
-      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-      script.onload = () => resolve(true);
-      script.onerror = () => resolve(false);
-      document.body.appendChild(script);
     });
   };
 
@@ -186,12 +228,17 @@ export const PatientBookAppointment = () => {
     setValidatingSlotKey(slot.start);
     try {
       if (selectedDoctorId && appointmentDate) {
-        await validateAppointmentSlotApi({
+        const valRes = await validateAppointmentSlotApi({
           doctorId: selectedDoctorId,
           appointmentDate,
           startTime: slot.start,
           endTime: slot.end
         });
+        const valData = valRes.data || valRes;
+        if (valData && valData.available === false) {
+          toast.error(valData.message || 'Slot is no longer available.');
+          return;
+        }
       }
       setSelectedSlot(slot);
     } catch (err) {
@@ -254,7 +301,7 @@ export const PatientBookAppointment = () => {
           amount: order.amount,
           currency: order.currency || 'INR',
           name: activeDoctor.organizationIdObj?.name || 'CareFlow Healthcare',
-          description: `Consultation with Dr. ${activeDoctor.name}`,
+          description: `Consultation with ${activeDoctor.name.startsWith('Dr.') ? activeDoctor.name : `Dr. ${activeDoctor.name}`}`,
           order_id: order.id,
           handler: async (response) => {
             try {
@@ -312,7 +359,12 @@ export const PatientBookAppointment = () => {
     );
   }
 
-  const activeDoc = selectedDoctor || doctors[0];
+  const activeDoc =
+    (selectedDoctor && selectedDoctor._id === selectedDoctorId ? selectedDoctor : null) ||
+    doctors.find((d) => d._id === selectedDoctorId) ||
+    selectedDoctor ||
+    doctors[0] ||
+    null;
   const fee = activeDoc?.consultationFee || 500;
 
   return (
@@ -353,11 +405,14 @@ export const PatientBookAppointment = () => {
                   onChange={(e) => setSelectedDoctorId(e.target.value)}
                   className="w-full text-xs sm:text-sm font-semibold text-slate-900 bg-white rounded-xl border border-slate-200 py-2.5 px-3.5 focus:outline-none focus:border-blue-500 cursor-pointer"
                 >
-                  {doctors.map((doc) => (
-                    <option key={doc._id} value={doc._id}>
-                      Dr. {doc.name} — {doc.specialization}
-                    </option>
-                  ))}
+                  {doctors.map((doc) => {
+                    const docDisplayName = doc.name.startsWith('Dr.') ? doc.name : `Dr. ${doc.name}`;
+                    return (
+                      <option key={doc._id} value={doc._id}>
+                        {docDisplayName} — {doc.specialization}
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
 
@@ -365,7 +420,7 @@ export const PatientBookAppointment = () => {
                 <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/70 flex items-center justify-between gap-3">
                   <div className="space-y-0.5 min-w-0">
                     <span className="font-extrabold text-slate-900 block truncate">
-                      Dr. {activeDoc.name}
+                      {activeDoc.name.startsWith('Dr.') ? activeDoc.name : `Dr. ${activeDoc.name}`}
                     </span>
                     <span className="text-[11px] text-blue-600 font-bold block truncate">
                       {activeDoc.specialization}
@@ -446,7 +501,7 @@ export const PatientBookAppointment = () => {
               <input
                 type="date"
                 value={appointmentDate}
-                min={new Date().toISOString().split('T')[0]}
+                min={getTodayString()}
                 onChange={(e) => setAppointmentDate(e.target.value)}
                 className="w-full text-xs sm:text-sm font-semibold text-slate-900 bg-white rounded-xl border border-slate-200 py-2.5 px-3.5 focus:outline-none focus:border-blue-500 cursor-pointer"
               />
@@ -520,7 +575,9 @@ export const PatientBookAppointment = () => {
               <div className="flex items-center justify-between py-1 border-b border-slate-100">
                 <span className="text-slate-500">Specialist</span>
                 <span className="font-bold text-slate-900">
-                  Dr. {activeDoc?.name || 'Selected Doctor'}
+                  {activeDoc?.name
+                    ? (activeDoc.name.startsWith('Dr.') ? activeDoc.name : `Dr. ${activeDoc.name}`)
+                    : 'Selected Doctor'}
                 </span>
               </div>
 

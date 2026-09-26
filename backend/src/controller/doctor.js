@@ -33,7 +33,8 @@ export const getAllDoctorsController = async (req, res) => {
         ? req.query.organizationId
         : (req.user?.organizationId || req.query.organizationId);
     const city = req.query.city;
-    const result = await getAllDoctorsService(organizationId, city);
+    const specialty = req.query.specialty || req.query.department;
+    const result = await getAllDoctorsService(organizationId, city, specialty);
     res.status(200).json({
         success: true,
         message: "Doctors fetched successfully",
@@ -72,7 +73,8 @@ export const updateMyAvailabilityController = async (req, res) => {
 };
 export const getDoctorController = async (req, res) => {
     const { id } = req.params;
-    const organizationId = req.user.organizationId;
+    const isPatientOrSuperAdmin = req.user?.role === "patient" || req.user?.role === "super_admin";
+    const organizationId = isPatientOrSuperAdmin ? null : req.user.organizationId;
     const result = await getDoctorService(id, organizationId);
     if (!result) {
         throw new AppError(404, "Doctor not found");

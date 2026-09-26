@@ -159,7 +159,7 @@ export const PatientAppointmentDetails = () => {
   return (
     <ContentContainer className="space-y-6 pb-12">
       <PageHeader
-        title={`Consultation with Dr. ${doctorName}`}
+        title={`Consultation with ${doctorName}`}
         subtitle={`${specialty} · ${formatDate(appointment.appointmentDate)} at ${formatTime(
           appointment.startTime
         )}`}

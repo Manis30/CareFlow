@@ -21,7 +21,7 @@ import { CardSkeleton } from '../../components/common/Skeleton';
 export const PatientDoctors = () => {
   const [searchParams] = useSearchParams();
   const initialSearch = searchParams.get('search') || '';
-  const initialSpecialty = searchParams.get('specialty') || '';
+  const initialSpecialty = searchParams.get('specialty') || searchParams.get('department') || '';
 
   const [cities, setCities] = useState([]);
   const [selectedCity, setSelectedCity] = useState(searchParams.get('city') || '');
@@ -30,8 +30,9 @@ export const PatientDoctors = () => {
     searchParams.get('organizationId') || ''
   );
 
-  const [searchQuery, setSearchQuery] = useState(initialSearch || initialSpecialty);
-  const [selectedDepartment, setSelectedDepartment] = useState('all');
+  const [searchQuery, setSearchQuery] = useState(initialSearch);
+  const [selectedDepartment, setSelectedDepartment] = useState(initialSpecialty || 'all');
+  const [allDepartments, setAllDepartments] = useState([]);
   const [clinicDepartments, setClinicDepartments] = useState([]);
   const [selectedMode, setSelectedMode] = useState('all'); // 'all' | 'online' | 'offline'
 
@@ -50,10 +51,11 @@ export const PatientDoctors = () => {
       setLoading(true);
       setError('');
 
-      const [citiesRes, doctorsRes, clinicsRes] = await Promise.all([
+      const [citiesRes, doctorsRes, clinicsRes, deptsRes] = await Promise.all([
         getOrganizationCitiesApi().catch(() => ({ data: [] })),
         getDoctorsApi().catch(() => ({ data: [] })),
-        getActiveOrganizationsApi({ city: selectedCity || undefined }).catch(() => ({ data: [] }))
+        getActiveOrganizationsApi({ city: selectedCity || undefined }).catch(() => ({ data: [] })),
+        getDepartmentsApi().catch(() => ({ data: [] }))
       ]);
 
       const cityList = citiesRes.data || (Array.isArray(citiesRes) ? citiesRes : []);
@@ -67,6 +69,9 @@ export const PatientDoctors = () => {
 
       const clinicList = clinicsRes.data || (Array.isArray(clinicsRes) ? clinicsRes : []);
       setClinics(Array.isArray(clinicList) ? clinicList : []);
+
+      const deptList = deptsRes.data || (Array.isArray(deptsRes) ? deptsRes : []);
+      setAllDepartments(Array.isArray(deptList) ? deptList : []);
     } catch (err) {
       setError(err.message || 'Failed to load doctors catalog');
     } finally {
@@ -112,12 +117,25 @@ export const PatientDoctors = () => {
 
   const fetchClinicDepartments = async (clinicId) => {
     try {
-      const res = await getDepartmentsApi(clinicId);
-      const list = res.data || [];
+      const res = await getDepartmentsApi({ organizationId: clinicId });
+      const list = res.data || (Array.isArray(res) ? res : []);
       setClinicDepartments(Array.isArray(list) ? list : []);
     } catch {
       setClinicDepartments([]);
     }
+  };
+
+  const handleCityChange = (e) => {
+    const city = e.target.value;
+    setSelectedCity(city);
+    setSelectedClinicId('');
+    setSelectedDepartment('all');
+  };
+
+  const handleClinicChange = (e) => {
+    const clinicId = e.target.value;
+    setSelectedClinicId(clinicId);
+    setSelectedDepartment('all');
   };
 
   const handleResetFilters = () => {
@@ -128,35 +146,130 @@ export const PatientDoctors = () => {
     setSelectedMode('all');
   };
 
-  // Filtered Doctors
+  // Compute available departments: specific to clinic if selected, or aggregated across all clinics
+  const availableDepartments = useMemo(() => {
+    const map = new Map();
+
+    if (selectedClinicId && clinicDepartments.length > 0) {
+      clinicDepartments.forEach((d) => {
+        const name = d?.name?.trim();
+        if (name && !map.has(name.toLowerCase())) {
+          map.set(name.toLowerCase(), { id: name, name });
+        }
+      });
+      return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+    }
+
+    allDepartments.forEach((d) => {
+      const name = d?.name?.trim();
+      if (name && !map.has(name.toLowerCase())) {
+        map.set(name.toLowerCase(), { id: name, name });
+      }
+    });
+
+    doctors.forEach((doc) => {
+      const spec = (doc.specialization || doc.specialty || '').trim();
+      if (spec && !map.has(spec.toLowerCase())) {
+        map.set(spec.toLowerCase(), { id: spec, name: spec });
+      }
+      const deptName = (doc.departmentId?.name || '').trim();
+      if (deptName && !map.has(deptName.toLowerCase())) {
+        map.set(deptName.toLowerCase(), { id: deptName, name: deptName });
+      }
+      if (Array.isArray(doc.departments)) {
+        doc.departments.forEach((d) => {
+          const s = String(d).trim();
+          if (s && !map.has(s.toLowerCase())) {
+            map.set(s.toLowerCase(), { id: s, name: s });
+          }
+        });
+      }
+    });
+
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [selectedClinicId, clinicDepartments, allDepartments, doctors]);
+
+  // Clean Multi-criteria Filtered Doctors
   const filteredDoctors = useMemo(() => {
     return doctors.filter((doc) => {
-      const docName = (doc.userId?.name || doc.name || '').toLowerCase();
-      const spec = (doc.specialization || doc.specialty || '').toLowerCase();
-      const clinicName = (doc.organizationId?.name || doc.clinicName || '').toLowerCase();
-      const q = searchQuery.toLowerCase().trim();
+      // 1. Text Search across name, specialty, clinic, department, and city
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase().trim();
+        const docName = (doc.userId?.name || doc.name || '').toLowerCase();
+        const spec = (doc.specialization || doc.specialty || '').toLowerCase();
+        const clinicName = (doc.organizationId?.name || doc.clinicName || '').toLowerCase();
+        const deptName = (doc.departmentId?.name || '').toLowerCase();
+        const deptsArr = (doc.departments || []).map((d) => String(d).toLowerCase()).join(' ');
+        const docCity = (
+          doc.organizationId?.address?.city ||
+          doc.organizationId?.city ||
+          doc.organizationId?.address?.district ||
+          ''
+        ).toLowerCase();
 
-      if (q && !docName.includes(q) && !spec.includes(q) && !clinicName.includes(q)) {
-        return false;
+        const matchesSearch =
+          docName.includes(q) ||
+          spec.includes(q) ||
+          clinicName.includes(q) ||
+          deptName.includes(q) ||
+          deptsArr.includes(q) ||
+          docCity.includes(q);
+
+        if (!matchesSearch) return false;
       }
 
+      // 2. City Filter: match against organization address.city / city / district
       if (selectedCity) {
-        const docCity = doc.organizationId?.city || '';
-        if (docCity.toLowerCase() !== selectedCity.toLowerCase()) return false;
+        const docCity = (
+          doc.organizationId?.address?.city ||
+          doc.organizationId?.city ||
+          doc.organizationId?.address?.district ||
+          ''
+        ).toLowerCase().trim();
+        if (docCity !== selectedCity.toLowerCase().trim()) return false;
       }
 
+      // 3. Hospital / Facility Filter
       if (selectedClinicId) {
-        const orgId = doc.organizationId?._id || doc.organizationId;
-        if (String(orgId) !== String(selectedClinicId)) return false;
+        const orgId = (
+          doc.organizationId?._id ||
+          doc.organizationId ||
+          ''
+        ).toString();
+        if (orgId !== String(selectedClinicId)) return false;
       }
 
-      if (selectedDepartment !== 'all') {
-        const depId = doc.departmentId?._id || doc.departmentId;
-        if (String(depId) !== String(selectedDepartment)) return false;
+      // 4. Department Filter: match against ID or department/specialty name
+      if (selectedDepartment && selectedDepartment !== 'all') {
+        const target = String(selectedDepartment).toLowerCase().trim();
+        const depId = (doc.departmentId?._id || doc.departmentId || '').toString().toLowerCase();
+        const depName = (doc.departmentId?.name || '').toLowerCase().trim();
+        const specName = (doc.specialization || doc.specialty || '').toLowerCase().trim();
+        const depIds = Array.isArray(doc.departmentIds)
+          ? doc.departmentIds.map((d) => (d?._id || d?.name || d || '').toString().toLowerCase())
+          : [];
+        const deptsArr = Array.isArray(doc.departments)
+          ? doc.departments.map((d) => String(d).toLowerCase().trim())
+          : [];
+
+        const matchesDept =
+          depName === target ||
+          specName === target ||
+          deptsArr.includes(target) ||
+          depId === target ||
+          depIds.includes(target) ||
+          (depName && depName.includes(target)) ||
+          (specName && specName.includes(target)) ||
+          deptsArr.some((d) => d && (d.includes(target) || target.includes(d)));
+
+        if (!matchesDept) return false;
       }
 
+      // 5. Consultation Mode Filter
       if (selectedMode !== 'all') {
-        const modes = doc.consultationModes || ['online', 'offline'];
+        const modes = Array.isArray(doc.consultationModes) && doc.consultationModes.length > 0
+          ? doc.consultationModes
+          : ['online', 'offline'];
         if (!modes.includes(selectedMode)) return false;
       }
 
@@ -171,6 +284,11 @@ export const PatientDoctors = () => {
     setPage: goToPage = () => {},
     totalItems: totalResults = 0
   } = usePagination(filteredDoctors, 9);
+
+  // Reset pagination to page 1 whenever any filter criteria changes
+  useEffect(() => {
+    goToPage(1);
+  }, [searchQuery, selectedCity, selectedClinicId, selectedDepartment, selectedMode]);
 
   if (loading) {
     return (
@@ -240,10 +358,7 @@ export const PatientDoctors = () => {
             </label>
             <select
               value={selectedCity}
-              onChange={(e) => {
-                setSelectedCity(e.target.value);
-                setSelectedClinicId('');
-              }}
+              onChange={handleCityChange}
               className="w-full text-xs font-medium text-slate-800 bg-white rounded-xl border border-slate-200 py-2 px-3 focus:outline-hidden focus:border-blue-500 cursor-pointer"
             >
               <option value="">All Locations</option>
@@ -262,7 +377,7 @@ export const PatientDoctors = () => {
             </label>
             <select
               value={selectedClinicId}
-              onChange={(e) => setSelectedClinicId(e.target.value)}
+              onChange={handleClinicChange}
               className="w-full text-xs font-medium text-slate-800 bg-white rounded-xl border border-slate-200 py-2 px-3 focus:outline-hidden focus:border-blue-500 cursor-pointer"
             >
               <option value="">All Facilities</option>
@@ -282,14 +397,13 @@ export const PatientDoctors = () => {
             <select
               value={selectedDepartment}
               onChange={(e) => setSelectedDepartment(e.target.value)}
-              disabled={clinicDepartments.length === 0}
-              className="w-full text-xs font-medium text-slate-800 bg-white rounded-xl border border-slate-200 py-2 px-3 focus:outline-hidden focus:border-blue-500 disabled:bg-slate-50 cursor-pointer"
+              className="w-full text-xs font-medium text-slate-800 bg-white rounded-xl border border-slate-200 py-2 px-3 focus:outline-hidden focus:border-blue-500 cursor-pointer"
             >
               <option value="all">
-                {clinicDepartments.length === 0 ? 'Select a clinic first' : 'All Departments'}
+                {selectedClinicId ? 'All Facility Departments' : 'All Departments'}
               </option>
-              {clinicDepartments.map((dep) => (
-                <option key={dep._id} value={dep._id}>
+              {availableDepartments.map((dep) => (
+                <option key={dep.id} value={dep.id}>
                   {dep.name}
                 </option>
               ))}

@@ -6,7 +6,8 @@ export const createDepartmentApi = async (data) => {
 };
 
 export const getDepartmentsApi = async (params) => {
-  const response = await api.get('/department/', { params });
+  const queryParams = typeof params === 'string' ? { organizationId: params } : params;
+  const response = await api.get('/department/', { params: queryParams });
   return response.data;
 };
 
