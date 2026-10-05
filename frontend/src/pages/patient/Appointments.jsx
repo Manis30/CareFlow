@@ -321,7 +321,7 @@ export const PatientAppointments = () => {
                       <div className="space-y-0.5 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <h3 className="text-sm font-bold text-slate-900 truncate">
-                            {docName.startsWith('Dr.') ? docName : `Dr. ${docName}`}
+                            {docName}
                           </h3>
                           {isLive && <PulseIndicator label="Active Consultation" />}
                         </div>

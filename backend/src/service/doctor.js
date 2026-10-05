@@ -22,6 +22,7 @@ import { getOrCreateGeneralDepartment } from "../repository/department.js";
 import AppointmentModel from "../model/appointment.js";
 import { getPatientByUserId } from "../repository/patient.js";
 import { parseTimeToMinutes, doTimeRangesOverlap, formatDateKey } from "../util/appointmentTimeUtils.js";
+import { formatDoctorName } from "../util/formatters.js";
 
 const resolveDepartmentAssignment = async (organizationId, rawDeptIds, rawDeptId) => {
     let inputIds = [];
@@ -563,7 +564,7 @@ export const addDoctorLeaveService = async (doctorUserId, { startDate, endDate, 
         isActive: { $ne: false }
     }).select("_id");
 
-    const doctorName = doctor.userId?.name ? `Dr. ${doctor.userId.name}` : "Doctor";
+    const doctorName = formatDoctorName(doctor.userId?.name, "Doctor");
 
     for (const appt of overlappingAppointments) {
         appt.needsRescheduling = true;

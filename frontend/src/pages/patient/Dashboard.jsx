@@ -31,6 +31,7 @@ import { KpiSkeleton, CardSkeleton } from '../../components/common/Skeleton';
 import { formatDate } from '../../utils/formatDate';
 import { formatTime } from '../../utils/formatTime';
 import { resolveDoctorName } from '../../utils/resolveDoctorName';
+import { formatDoctorName } from '../../utils/formatters';
 
 export const PatientDashboard = () => {
   const [upcomingAppts, setUpcomingAppts] = useState([]);
@@ -261,13 +262,11 @@ export const PatientDashboard = () => {
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex items-start gap-3">
                       <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-700 font-bold text-sm flex items-center justify-center shrink-0 border border-blue-100">
-                        {resolveDoctorName(nextAppt.doctorId).charAt(0).toUpperCase()}
+                        {resolveDoctorName(nextAppt.doctorId).replace(/^(\s*dr\.?\s*|\s*doctor\s*)+/i, '').trim().charAt(0).toUpperCase() || 'D'}
                       </div>
                       <div className="space-y-0.5 min-w-0">
                         <h3 className="text-sm font-bold text-slate-900 truncate">
-                          {resolveDoctorName(nextAppt.doctorId).startsWith('Dr.')
-                            ? resolveDoctorName(nextAppt.doctorId)
-                            : `Dr. ${resolveDoctorName(nextAppt.doctorId)}`}
+                          {resolveDoctorName(nextAppt.doctorId)}
                         </h3>
                         <p className="text-xs text-blue-600 font-semibold">
                           {nextAppt.doctorId?.specialization || 'Clinical Specialist'}
@@ -458,7 +457,7 @@ export const PatientDashboard = () => {
               ) : (
                 <div className="space-y-2">
                   {prescriptions.slice(0, 3).map((rx) => {
-                    const docName = rx.doctorId?.userId?.name || rx.doctorId?.name || rx.doctorName || 'Doctor';
+                    const docName = formatDoctorName(rx.doctorId?.userId?.name || rx.doctorId?.name || rx.doctorName || 'Doctor');
                     const medCount = rx.medicines?.length || rx.medications?.length || 0;
                     return (
                       <div
@@ -468,7 +467,7 @@ export const PatientDashboard = () => {
                       >
                         <div className="min-w-0 flex-1">
                           <h4 className="font-bold text-slate-900 truncate">
-                            Dr. {docName}
+                            {docName}
                           </h4>
                           <p className="text-[11px] text-slate-500 font-medium">
                             {medCount} medication{medCount !== 1 ? 's' : ''} · {formatDate(rx.createdAt || rx.date)}

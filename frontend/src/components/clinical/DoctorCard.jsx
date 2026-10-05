@@ -1,7 +1,7 @@
 import React from 'react';
 import { Stethoscope, Building2, Video, MapPin } from 'lucide-react';
 import Button from '../common/Button';
-import { formatCurrency } from '../../utils/formatters';
+import { formatCurrency, formatDoctorName } from '../../utils/formatters';
 import { resolveProfileImage } from '../../utils/resolveProfileImage';
 
 export const DoctorCard = ({
@@ -12,7 +12,7 @@ export const DoctorCard = ({
 }) => {
   if (!doctor) return null;
 
-  const doctorName = doctor.userId?.name || doctor.name || 'Doctor';
+  const doctorName = formatDoctorName(doctor.userId?.name || doctor.name, 'Doctor');
   const specialty = doctor.specialization || doctor.specialty || 'General Medicine';
   const clinicName = doctor.organizationId?.name || doctor.clinicName || 'CareFlow Clinic';
   const experience = doctor.experienceYears || doctor.experience || null;
@@ -30,13 +30,13 @@ export const DoctorCard = ({
           {photoUrl ? (
             <img src={photoUrl} alt={doctorName} className="w-full h-full object-cover" />
           ) : (
-            <span>{doctorName.charAt(0).toUpperCase()}</span>
+            <span>{doctorName.replace(/^(\s*dr\.?\s*|\s*doctor\s*)+/i, '').trim().charAt(0).toUpperCase() || 'D'}</span>
           )}
         </div>
 
         <div className="flex-1 min-w-0">
           <h3 className="text-sm font-bold text-slate-900 group-hover:text-blue-600 transition-colors truncate">
-            {doctorName.startsWith('Dr.') ? doctorName : `Dr. ${doctorName}`}
+            {doctorName}
           </h3>
 
           <div className="flex items-center gap-1.5 text-xs text-blue-600 font-semibold mt-0.5">

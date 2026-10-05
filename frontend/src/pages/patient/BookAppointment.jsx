@@ -301,7 +301,7 @@ export const PatientBookAppointment = () => {
           amount: order.amount,
           currency: order.currency || 'INR',
           name: activeDoctor.organizationIdObj?.name || 'CareFlow Healthcare',
-          description: `Consultation with ${activeDoctor.name.startsWith('Dr.') ? activeDoctor.name : `Dr. ${activeDoctor.name}`}`,
+          description: `Consultation with ${formatDoctorName(activeDoctor.name)}`,
           order_id: order.id,
           handler: async (response) => {
             try {
@@ -406,7 +406,7 @@ export const PatientBookAppointment = () => {
                   className="w-full text-xs sm:text-sm font-semibold text-slate-900 bg-white rounded-xl border border-slate-200 py-2.5 px-3.5 focus:outline-none focus:border-blue-500 cursor-pointer"
                 >
                   {doctors.map((doc) => {
-                    const docDisplayName = doc.name.startsWith('Dr.') ? doc.name : `Dr. ${doc.name}`;
+                    const docDisplayName = formatDoctorName(doc.name);
                     return (
                       <option key={doc._id} value={doc._id}>
                         {docDisplayName} — {doc.specialization}
@@ -420,7 +420,7 @@ export const PatientBookAppointment = () => {
                 <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/70 flex items-center justify-between gap-3">
                   <div className="space-y-0.5 min-w-0">
                     <span className="font-extrabold text-slate-900 block truncate">
-                      {activeDoc.name.startsWith('Dr.') ? activeDoc.name : `Dr. ${activeDoc.name}`}
+                      {formatDoctorName(activeDoc.name)}
                     </span>
                     <span className="text-[11px] text-blue-600 font-bold block truncate">
                       {activeDoc.specialization}
@@ -575,9 +575,7 @@ export const PatientBookAppointment = () => {
               <div className="flex items-center justify-between py-1 border-b border-slate-100">
                 <span className="text-slate-500">Specialist</span>
                 <span className="font-bold text-slate-900">
-                  {activeDoc?.name
-                    ? (activeDoc.name.startsWith('Dr.') ? activeDoc.name : `Dr. ${activeDoc.name}`)
-                    : 'Selected Doctor'}
+                  {activeDoc?.name ? formatDoctorName(activeDoc.name) : 'Selected Doctor'}
                 </span>
               </div>
 

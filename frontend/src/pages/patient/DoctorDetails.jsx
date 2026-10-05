@@ -131,7 +131,7 @@ export const PatientDoctorDetails = () => {
                 {photoUrl ? (
                   <img src={photoUrl} alt={doctorName} className="w-full h-full object-cover" />
                 ) : (
-                  <span>{doctorName.charAt(0).toUpperCase()}</span>
+                  <span>{doctorName.replace(/^(\s*dr\.?\s*|\s*doctor\s*)+/i, '').trim().charAt(0).toUpperCase() || 'D'}</span>
                 )}
               </div>
               <div className="space-y-1 min-w-0">

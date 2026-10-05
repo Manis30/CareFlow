@@ -54,9 +54,7 @@ export const formatDoctorName = (rawName, fallback = 'Doctor') => {
   }
 
   let name = String(rawName).trim();
-  while (/^(dr\.?|doctor)\s+/i.test(name)) {
-    name = name.replace(/^(dr\.?|doctor)\s+/i, '').trim();
-  }
+  name = name.replace(/^(\s*dr\.?\s*|\s*doctor\s*|\s*specialist\s*)+/i, '').trim();
 
   if (!name || name.toLowerCase() === 'unknown') return `Dr. ${fallback}`;
 

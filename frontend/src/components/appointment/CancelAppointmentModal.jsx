@@ -4,6 +4,7 @@ import Button from '../common/Button';
 import { formatDate } from '../../utils/formatDate';
 import { formatTime } from '../../utils/formatTime';
 import { checkCancellationEligibility } from '../../utils/appointmentCancellationUtils';
+import { formatDoctorName } from '../../utils/formatters';
 
 const CancelAppointmentModal = ({
   isOpen,
@@ -19,7 +20,7 @@ const CancelAppointmentModal = ({
 
   const doctor = appointment.doctorId ?? appointment.doctor ?? null;
   const org = appointment.organizationId ?? appointment.organization ?? null;
-  const doctorName = doctor?.userId?.name || doctor?.name || 'Assigned Doctor';
+  const doctorName = formatDoctorName(doctor?.userId?.name || doctor?.name, 'Assigned Doctor');
   const doctorSpec = doctor?.specialization || 'Specialist';
   const orgName = org?.name || 'CarePlus Medical Center';
 
@@ -79,10 +80,10 @@ const CancelAppointmentModal = ({
           <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-3">
             <div className="flex items-center gap-3 pb-3 border-b border-slate-200/60">
               <div className="w-10 h-10 rounded-full bg-teal-100 text-teal-700 font-bold text-xs flex items-center justify-center border border-teal-200 shrink-0">
-                Dr
+                {doctorName.replace(/^(\s*dr\.?\s*|\s*doctor\s*)+/i, '').trim().charAt(0).toUpperCase() || 'D'}
               </div>
               <div>
-                <h4 className="text-xs font-bold text-slate-900">Dr. {doctorName}</h4>
+                <h4 className="text-xs font-bold text-slate-900">{doctorName}</h4>
                 <p className="text-[11px] text-teal-600 font-medium flex items-center gap-1 mt-0.5">
                   <Stethoscope className="w-3 h-3" />
                   {doctorSpec}

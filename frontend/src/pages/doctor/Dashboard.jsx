@@ -30,6 +30,7 @@ import { KpiSkeleton, ScheduleSkeleton, CardSkeleton, ChartSkeleton } from '../.
 import { CareFlowDonutChart, CareFlowTrendChart, CLINICAL_COLORS } from '../../components/amcharts';
 import { formatDate } from '../../utils/formatDate';
 import { formatTime } from '../../utils/formatTime';
+import { formatDoctorName } from '../../utils/formatters';
 
 export const DoctorDashboard = () => {
   const { user } = useAuth();
@@ -65,7 +66,7 @@ export const DoctorDashboard = () => {
     }
   };
 
-  const doctorName = user?.name || 'Practitioner';
+  const doctorName = formatDoctorName(user?.name, 'Practitioner');
   const specialization = user?.doctorProfile?.specialization || 'General Medicine';
   const clinicName = user?.doctorProfile?.clinicName || 'CareFlow Health';
 
@@ -203,7 +204,7 @@ export const DoctorDashboard = () => {
           </div>
 
           <h2 className="text-lg sm:text-xl font-bold text-slate-900 tracking-tight truncate">
-            Good day, Dr. {doctorName}
+            Good day, {doctorName}
           </h2>
 
           <p className="text-xs font-medium text-slate-500 flex items-center gap-2">

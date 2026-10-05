@@ -638,8 +638,8 @@ export const Doctors = () => {
         onClose={() => setDeleteModal({ isOpen: false, doctor: null })}
         onConfirm={handleDelete}
         title="Deactivate Clinician"
-        message={`Are you sure you want to deactivate Dr. ${
-          deleteModal.doctor?.userId?.name || deleteModal.doctor?.name || ''
+        message={`Are you sure you want to deactivate ${
+          formatDoctorName(deleteModal.doctor?.userId?.name || deleteModal.doctor?.name || '')
         }? They will no longer appear for active appointment bookings.`}
         confirmText="Deactivate"
         variant="danger"

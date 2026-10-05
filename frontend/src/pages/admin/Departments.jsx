@@ -37,6 +37,7 @@ import { CareFlowCategoryScorecard, CLINICAL_COLORS } from '../../components/amc
 import usePagination from '../../hooks/usePagination';
 import { showSuccessToast, showErrorToast } from '../../utils/toast';
 import { confirmDelete } from '../../utils/confirmDialog';
+import { formatDoctorName } from '../../utils/formatters';
 
 export const Departments = () => {
   const navigate = useNavigate();
@@ -402,7 +403,7 @@ export const Departments = () => {
         onClose={() => setDeleteModal({ isOpen: false, doctor: null })}
         onConfirm={handleDeactivateDoctor}
         title="Deactivate Clinician"
-        message={`Are you sure you want to deactivate Dr. ${deleteModal.doctor?.userId?.name || deleteModal.doctor?.name}?`}
+        message={`Are you sure you want to deactivate ${formatDoctorName(deleteModal.doctor?.userId?.name || deleteModal.doctor?.name)}?`}
         variant="danger"
         loading={actionLoading}
       />
@@ -436,7 +437,7 @@ const DepartmentDoctorsTable = ({
           </thead>
           <tbody className="divide-y divide-slate-100">
             {paginatedItems.map((doc) => {
-              const doctorName = doc.userId?.name || doc.name || 'Doctor';
+              const doctorName = formatDoctorName(doc.userId?.name || doc.name || 'Doctor');
               const doctorEmail = doc.userId?.email || doc.email || 'N/A';
               const doctorPhone = doc.userId?.phone || doc.phone || 'N/A';
               const profileUrl = doc.userId?.profileImage?.url || doc.profileImage?.url;
@@ -467,7 +468,7 @@ const DepartmentDoctorsTable = ({
                   </td>
                   <td className="px-4 py-3 font-bold text-slate-900">
                     <span className="group-hover:text-blue-600 transition-colors">
-                      Dr. {doctorName}
+                      {doctorName}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-slate-600 font-medium">{doc.specialization || 'General'}</td>

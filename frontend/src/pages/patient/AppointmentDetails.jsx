@@ -215,10 +215,10 @@ export const PatientAppointmentDetails = () => {
 
                 <div className="flex items-start gap-4">
                   <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-700 font-bold text-lg flex items-center justify-center shrink-0 border border-blue-100 shadow-2xs">
-                    {doctorName.charAt(0)}
+                    {doctorName.replace(/^(\s*dr\.?\s*|\s*doctor\s*)+/i, '').trim().charAt(0).toUpperCase() || 'D'}
                   </div>
                   <div className="space-y-0.5 min-w-0">
-                    <h3 className="text-base font-bold text-slate-900">Dr. {doctorName}</h3>
+                    <h3 className="text-base font-bold text-slate-900">{doctorName}</h3>
                     <p className="text-xs text-blue-600 font-semibold">{specialty}</p>
                     <p className="text-xs text-slate-500 flex items-center gap-1.5 pt-0.5 font-medium">
                       <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />

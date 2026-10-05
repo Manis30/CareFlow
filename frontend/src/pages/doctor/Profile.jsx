@@ -21,6 +21,7 @@ import PageHeader from '../../components/layout/PageHeader';
 import ContentContainer from '../../components/layout/ContentContainer';
 import { showSuccessToast, showErrorToast } from '../../utils/toast';
 import { formatTimeRange } from '../../utils/formatTime';
+import { formatDoctorName } from '../../utils/formatters';
 
 const DAYS_OF_WEEK = [
   { key: 'monday', label: 'Monday' },
@@ -102,7 +103,7 @@ const DoctorProfile = () => {
   }
 
   const userObj = doctor?.userId || user || {};
-  const doctorName = userObj.name || doctor?.name || 'Dr. Practitioner';
+  const doctorName = formatDoctorName(userObj.name || doctor?.name, 'Practitioner');
   const email = userObj.email || 'N/A';
   const phone = userObj.phone || doctor?.phone || 'N/A';
   const gender = doctor?.gender || userObj.gender || 'Not Specified';

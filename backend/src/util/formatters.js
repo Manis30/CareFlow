@@ -19,7 +19,7 @@ export const formatDoctorName = (rawName, unavailableFallback = null) => {
     }
 
     // Aggressively strip multiple leading "Dr.", "Dr ", "Doctor", "Dr. Dr.", "Specialist", case-insensitively
-    const stripped = trimmed.replace(/^(dr\.?\s*|doctor\s*|specialist\s*)+/i, "").trim();
+    const stripped = trimmed.replace(/^(\s*dr\.?\s*|\s*doctor\s*|\s*specialist\s*)+/i, "").trim();
 
     // Check if stripped name is an invalid or fake placeholder
     const lower = stripped.toLowerCase();
