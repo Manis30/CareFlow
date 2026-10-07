@@ -34,7 +34,7 @@
 
 ---
 
-## 💡 Executive Summary
+## 💡 Executive  Summary
 Modern clinical practices suffer from severe workflow fragmentation between patient scheduling, receptionist queues, physician consultation records, pharmacy fulfillment, and administrative billing. **CareFlow** resolves this by consolidating all hospital operations into a role-governed ecosystem supporting real-time WebSockets communication, multi-tenant RBAC, automated OCR document parsing, Gemini AI-assisted clinical diagnosis support, and automated Razorpay transactions.
 
 ---
