@@ -72,3 +72,27 @@ export const screenEmergencySymptoms = (text) => {
     return { isEmergency: false, detectedKeyword: null };
 };
 
+/**
+ * Deterministic Clinical Safety Screener for Missed Medication Doses (Rule 15).
+ * Policy: NEVER advise doubling the next dose.
+ * Always refer to prescription label, doctor, or pharmacist.
+ */
+export const screenMedicationMissedDoseSafety = (text) => {
+    if (!text || typeof text !== "string") {
+        return null;
+    }
+
+    const lower = text.toLowerCase();
+    const asksAboutMissedDose = /\b(?:miss|missed|forgot|skip|skipped)\s+(?:a\s+|my\s+)?(?:dose|pill|tablet|medicine|medication)\b/i.test(lower);
+    const mentionsDoubling = /\b(?:double|two\s+doses|twice\s+the\s+dose|take\s+two)\b/i.test(lower);
+
+    if (asksAboutMissedDose || mentionsDoubling) {
+        return {
+            triggered: true,
+            warning: "CLINICAL SAFETY POLICY: If you miss a dose, NEVER take a double dose to make up for the missed one. Take the missed dose as soon as you remember, unless it is almost time for your next scheduled dose. Please check your prescription label instructions or consult your prescribing physician."
+        };
+    }
+
+    return null;
+};
+

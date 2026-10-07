@@ -16,6 +16,7 @@ import prescriptionRoute from './route/prescription.js';
 import chatRoute from './route/chat.js';
 import aiRoute from './route/ai.js';
 import notificationRoute from './route/notification.js';
+import medicationRoute from './route/medication.js';
 import errorHandler from './middleware/errorHandler.js';
 const app=express()
 console.log("check url", process.env.CLIENT_URL)
@@ -44,6 +45,7 @@ app.use('/api/v1/payment',paymentRoute);
 app.use('/api/v1/super-admin',superAdminRoute);
 app.use('/api/v1/medical-record',medicalRecordRoute);
 app.use('/api/v1/prescription',prescriptionRoute);
+app.use('/api/v1/medication',medicationRoute);
 app.use('/api/v1/chat',chatRoute);
 app.use('/api/v1/ai',aiRoute);
 app.use('/api/v1/notification',notificationRoute);

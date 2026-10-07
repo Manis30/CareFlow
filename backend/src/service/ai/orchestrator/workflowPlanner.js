@@ -64,7 +64,22 @@ const NON_BOOKING_INTENTS = new Set([
     "DOCTOR_LEAVE",
     "CHECK_IN_PATIENT",
     "DRAFT_CLINICAL_NOTES",
-    "DRAFT_PRESCRIPTION"
+    "DRAFT_PRESCRIPTION",
+    "GET_PATIENT_CARE_TIMELINE",
+    "CARE_TIMELINE",
+    "GET_TODAY_MEDICATIONS",
+    "TODAY_MEDICATIONS",
+    "MY_MEDICATIONS",
+    "GET_MEDICATION_ADHERENCE",
+    "MEDICATION_ADHERENCE",
+    "GET_PROACTIVE_CARE",
+    "PROACTIVE_CARE",
+    "GET_FOLLOW_UP_CARE",
+    "FOLLOW_UP_CARE",
+    "LOG_DOSE",
+    "PROPOSE_MEDICATION_SCHEDULE",
+    "CHECK_PRESCRIPTION_SAFETY",
+    "GET_DOCTORS"
 ]);
 
 const bookingGoal = (state, intent) => {
@@ -90,7 +105,7 @@ const buildBookingStateFromTrace = (state, trace = []) => {
             }
         }
 
-        if (step.toolName === "searchDoctors") {
+        if (step.toolName === "searchDoctors" || step.toolName === "getDoctors") {
             if (r.specialty) next.specialty = r.specialty;
             if (Array.isArray(r.doctors)) {
                 next.doctors = r.doctors.map(d => ({
@@ -468,6 +483,73 @@ export const planWorkflowStep = async (
             ...extracted,
             agentState: state
         };
+    }
+
+    // Multi-Tool Flow 1: Patient querying prescription/records for "last appointment" (Section 10)
+    const isQueryReferencingLastAppointment = /\b(?:last|latest|previous|recent|past)\s+(?:appointment|visit|consultation|doctor\s+visit)\b/i.test(promptMessage);
+    const isPrescriptionOrRecordTool = ["getMyPrescriptions", "explainMyPrescriptions", "getMyMedicalRecords"].includes(extracted.toolName);
+
+    if (user?.role === "patient" && isQueryReferencingLastAppointment && isPrescriptionOrRecordTool && !extracted.toolArgs?.appointmentId) {
+        const apptStep = trace.find(s => s.toolName === "getMyAppointments");
+        if (!apptStep) {
+            // Step 1: Query user appointments to resolve the last appointment
+            return {
+                action: "EXECUTE_TOOL",
+                toolName: "getMyAppointments",
+                toolArgs: { prompt: promptMessage },
+                intent: "GET_APPOINTMENTS",
+                confidence: extracted.confidence,
+                modelUsed: extracted.modelUsed,
+                requiredCapabilities: [extracted.toolName],
+                agentState: state
+            };
+        } else {
+            // Step 2: Extract latest appointment ID from observation
+            const appts = Array.isArray(apptStep.result) ? apptStep.result : (apptStep.result?.appointments || []);
+            const sortedAppts = [...appts].sort((a, b) => new Date(b.appointmentDate || b.createdAt || 0) - new Date(a.appointmentDate || a.createdAt || 0));
+            if (sortedAppts.length > 0) {
+                const latest = sortedAppts[0];
+                extracted.toolArgs = { ...extracted.toolArgs, appointmentId: String(latest._id || latest.id) };
+            } else {
+                return {
+                    action: "RESPOND",
+                    responseType: "ANSWER",
+                    aiResponse: "You do not have any past appointments on record.",
+                    agentState: state
+                };
+            }
+        }
+    }
+
+    // Multi-Tool Flow 2: Doctor querying nearest upcoming appointment / next patient (Section 27)
+    if (user?.role === "doctor" && extracted.toolName === "summarizeAppointmentContext" && !extracted.toolArgs?.appointmentId) {
+        const apptStep = trace.find(s => s.toolName === "getMyAppointments");
+        if (!apptStep) {
+            return {
+                action: "EXECUTE_TOOL",
+                toolName: "getMyAppointments",
+                toolArgs: { prompt: promptMessage },
+                intent: "GET_APPOINTMENTS",
+                confidence: extracted.confidence,
+                modelUsed: extracted.modelUsed,
+                requiredCapabilities: ["summarizeAppointmentContext"],
+                agentState: state
+            };
+        } else {
+            const appts = Array.isArray(apptStep.result) ? apptStep.result : (apptStep.result?.appointments || []);
+            const upcoming = appts.filter(a => a.status !== "CANCELLED" && a.status !== "COMPLETED");
+            if (upcoming.length > 0) {
+                const nearest = upcoming[0];
+                extracted.toolArgs = { ...extracted.toolArgs, appointmentId: String(nearest._id || nearest.id) };
+            } else {
+                return {
+                    action: "RESPOND",
+                    responseType: "ANSWER",
+                    aiResponse: "You do not have any upcoming appointments scheduled on your calendar at this time.",
+                    agentState: state
+                };
+            }
+        }
     }
 
     // If summarizeAppointmentContext lacks appointmentId (e.g. no upcoming appointments):

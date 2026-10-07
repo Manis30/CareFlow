@@ -104,10 +104,15 @@ export const checkGroundingGuardrail = (generatedText, contextData) => {
         }
     }
 
+    // 5. Clinical Safety Check: NEVER advise doubling missed doses (Rule 15)
+    if (/\b(?:take\s+two|double\s+(?:the|your)?\s*dose|take\s+double)\b/i.test(generatedText)) {
+        ungroundedItems.push("Forbidden missed-dose doubling recommendation (Clinical Safety Policy Violation)");
+    }
+
     const isGrounded = ungroundedItems.length === 0;
 
     if (!isGrounded) {
-        console.warn(`[Grounding Guardrail Warning] Potential hallucination detected in generated answer: ${ungroundedItems.join(", ")}. Falling back to raw context.`);
+        console.warn(`[Grounding Guardrail Warning] Guardrail check failed: ${ungroundedItems.join(", ")}. Falling back to raw context.`);
     }
 
     return {

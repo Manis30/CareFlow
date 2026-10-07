@@ -19,6 +19,27 @@ const medicineSchema = new mongoose.Schema({
         type: String,
         default: null
     },
+    timesPerDay: {
+        type: Number,
+        default: null
+    },
+    timesOfDay: {
+        type: [String],
+        default: []
+    },
+    withFood: {
+        type: String,
+        enum: ["before_food", "with_food", "after_food", "unspecified", null],
+        default: null
+    },
+    startDate: {
+        type: Date,
+        default: null
+    },
+    endDate: {
+        type: Date,
+        default: null
+    },
     instructions: {
         type: String,
         default: null

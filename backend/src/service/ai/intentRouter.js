@@ -229,6 +229,7 @@ const ALLOWED_TOOLS = new Set([
     "cancelAppointment",
     "rescheduleAppointment",
     "classifySpecialtyFromSymptoms",
+    "getDoctors",
     "searchDoctors",
     "getDoctorAvailability",
     "getMyAppointments",
@@ -243,39 +244,56 @@ const ALLOWED_TOOLS = new Set([
     "getPaymentStats",
     "getSystemHealthTrends",
     "getMyPrescriptions",
+    "getMyPayments",
     "explainMyPrescriptions",
     "getMyMedicalRecords",
     "checkInPatient",
     "getOrganizationRoster",
     "getDoctorLeave",
-    "getMyDoctorProfile"
+    "getMyDoctorProfile",
+    "getPatientCareTimeline",
+    "getTodayMedications",
+    "getMedicationAdherence",
+    "getProactivePatientCare",
+    "getFollowUpCare",
+    "logDose",
+    "proposeMedicationSchedule",
+    "checkPrescriptionSafety",
+    "doctorApproveMedicationSchedule"
 ]);
 
 const ROLE_ALLOWED_TOOLS = {
     patient: new Set([
         "createAppointmentHold", "cancelAppointment", "rescheduleAppointment",
-        "classifySpecialtyFromSymptoms", "searchDoctors", "getDoctorAvailability",
-        "getMyAppointments", "searchMyDocuments", "getMyPrescriptions",
-        "explainMyPrescriptions", "getMyMedicalRecords"
+        "classifySpecialtyFromSymptoms", "getDoctors", "searchDoctors", "getDoctorAvailability",
+        "getMyAppointments", "searchMyDocuments", "getMyPrescriptions", "getMyPayments",
+        "explainMyPrescriptions", "getMyMedicalRecords", "getPatientCareTimeline",
+        "getTodayMedications", "getMedicationAdherence", "getProactivePatientCare",
+        "getFollowUpCare", "logDose", "proposeMedicationSchedule"
     ]),
     doctor: new Set([
         "getMyAppointments", "getDoctorAvailability", "getDoctorLeave",
         "getAuthorizedPatientHistory", "summarizeAppointmentContext",
         "draftClinicalNotes", "draftPrescription", "getClinicStats",
-        "searchDoctors", "getMyDoctorProfile", "searchMyDocuments",
-        "getMyMedicalRecords", "getMyPrescriptions", "explainMyPrescriptions"
+        "getDoctors", "searchDoctors", "getMyDoctorProfile", "searchMyDocuments",
+        "getMyMedicalRecords", "getMyPrescriptions", "explainMyPrescriptions",
+        "getPatientCareTimeline", "getTodayMedications", "getMedicationAdherence",
+        "getFollowUpCare", "logDose", "proposeMedicationSchedule", "checkPrescriptionSafety",
+        "doctorApproveMedicationSchedule"
     ]),
     admin: new Set([
         "getMyAppointments", "getDoctorAvailability", "getDoctorLeave",
         "getClinicStats", "getHealthcareAnalytics", "getPaymentStats",
-        "searchDoctors", "getOrganizationRoster", "checkInPatient",
-        "cancelAppointment", "rescheduleAppointment", "getMyDoctorProfile"
+        "getDoctors", "searchDoctors", "getOrganizationRoster", "checkInPatient",
+        "cancelAppointment", "rescheduleAppointment", "getMyDoctorProfile",
+        "checkPrescriptionSafety", "doctorApproveMedicationSchedule"
     ]),
     organization_admin: new Set([
         "getMyAppointments", "getDoctorAvailability", "getDoctorLeave",
         "getClinicStats", "getHealthcareAnalytics", "getPaymentStats",
-        "searchDoctors", "getOrganizationRoster", "checkInPatient",
-        "cancelAppointment", "rescheduleAppointment", "getMyDoctorProfile"
+        "getDoctors", "searchDoctors", "getOrganizationRoster", "checkInPatient",
+        "cancelAppointment", "rescheduleAppointment", "getMyDoctorProfile",
+        "checkPrescriptionSafety", "doctorApproveMedicationSchedule"
     ]),
     super_admin: new Set([
         ...ALLOWED_TOOLS,
@@ -288,8 +306,9 @@ const TOOL_REQUIRED_FIELDS = {
     cancelAppointment: ["appointmentId"],
     rescheduleAppointment: ["appointmentId", "appointmentDate", "startTime", "endTime"],
     classifySpecialtyFromSymptoms: ["symptoms"],
+    getDoctors: [],
     searchDoctors: [],
-    getDoctorAvailability: ["date"],
+    getDoctorAvailability: [],
     getAuthorizedPatientHistory: ["appointmentId"],
     summarizeAppointmentContext: ["appointmentId"],
     draftClinicalNotes: ["appointmentId"],
@@ -312,7 +331,10 @@ const INTENT_TO_TOOL = {
     CLASSIFY_SYMPTOMS: "classifySpecialtyFromSymptoms",
     TRIAGE_SYMPTOMS: "classifySpecialtyFromSymptoms",
     SYMPTOM_CHECK: "classifySpecialtyFromSymptoms",
-    SEARCH_DOCTOR: "searchDoctors",
+    SEARCH_DOCTOR: "getDoctors",
+    SEARCH_DOCTORS: "getDoctors",
+    GET_DOCTORS: "getDoctors",
+    FIND_DOCTORS: "getDoctors",
     GET_DOCTOR_AVAILABILITY: "getDoctorAvailability",
     GET_APPOINTMENTS: "getMyAppointments",
     GET_PATIENT_HISTORY: "getAuthorizedPatientHistory",
@@ -330,6 +352,8 @@ const INTENT_TO_TOOL = {
     GET_PAYMENT_STATS: "getPaymentStats",
     GET_SYSTEM_HEALTH_TRENDS: "getSystemHealthTrends",
     GET_PRESCRIPTIONS: "getMyPrescriptions",
+    GET_MY_PAYMENTS: "getMyPayments",
+    MY_PAYMENTS: "getMyPayments",
     EXPLAIN_PRESCRIPTIONS: "explainMyPrescriptions",
     GET_MEDICAL_RECORDS: "getMyMedicalRecords",
     CHECK_IN_PATIENT: "checkInPatient",
@@ -337,7 +361,25 @@ const INTENT_TO_TOOL = {
     GET_DOCTOR_LEAVE: "getDoctorLeave",
     GET_DOCTOR_PROFILE: "getMyDoctorProfile",
     GET_MY_DEPARTMENT: "getMyDoctorProfile",
-    GET_DOCTOR_DEPARTMENT: "getMyDoctorProfile"
+    GET_DOCTOR_DEPARTMENT: "getMyDoctorProfile",
+    GET_PATIENT_CARE_TIMELINE: "getPatientCareTimeline",
+    CARE_TIMELINE: "getPatientCareTimeline",
+    PATIENT_TIMELINE: "getPatientCareTimeline",
+    GET_TODAY_MEDICATIONS: "getTodayMedications",
+    TODAY_MEDICATIONS: "getTodayMedications",
+    MY_MEDICATIONS: "getTodayMedications",
+    GET_MEDICATION_ADHERENCE: "getMedicationAdherence",
+    MEDICATION_ADHERENCE: "getMedicationAdherence",
+    GET_PROACTIVE_CARE: "getProactivePatientCare",
+    PROACTIVE_CARE: "getProactivePatientCare",
+    GET_FOLLOW_UP_CARE: "getFollowUpCare",
+    FOLLOW_UP_CARE: "getFollowUpCare",
+    LOG_DOSE: "logDose",
+    TAKE_MEDICINE: "logDose",
+    PROPOSE_MEDICATION_SCHEDULE: "proposeMedicationSchedule",
+    CHECK_PRESCRIPTION_SAFETY: "checkPrescriptionSafety",
+    DOCTOR_APPROVE_MEDICATION_SCHEDULE: "doctorApproveMedicationSchedule",
+    APPROVE_MEDICATION_SCHEDULE: "doctorApproveMedicationSchedule"
 };
 
 /**
@@ -426,6 +468,7 @@ export const extractIntent = async (
             toolName: null,
             toolArgs: {},
             missingRequiredFields: [],
+            requiredCapabilities: [],
             confidence: 0,
             clarify: true,
             clarificationQuestion: "I’m unable to understand that request right now. Please try again in a little more detail.",
@@ -440,6 +483,7 @@ export const extractIntent = async (
             toolName: null,
             toolArgs: {},
             missingRequiredFields: [],
+            requiredCapabilities: [],
             confidence: 0,
             clarify: true,
             clarificationQuestion: "I couldn't understand that request. Could you rephrase what you'd like CareFlow to do?",
@@ -452,6 +496,7 @@ export const extractIntent = async (
         toolName = null,
         toolArgs = {},
         missingRequiredFields = [],
+        requiredCapabilities = [],
         confidence = 0
     } = rawOutput;
 
@@ -481,14 +526,83 @@ export const extractIntent = async (
     }
 
     // Strict Financial Intent Routing (Rule 6.7):
-    // Financial queries (revenue, payments, transactions, collections, refunds) MUST use payment/revenue analytics.
-    const isFinancialQuery = /\b(revenue|payments?|transactions?|collected|collections?|refunds?|refunded|pending payments?)\b/i.test(pLower);
+    // Financial queries (revenue, payments, transactions, collections, refunds, how much paid)
+    const isFinancialQuery = /\b(revenue|payments?|transactions?|collected|collections?|refunds?|refunded|pending payments?|how much (?:have i|did i) paid|paid)\b/i.test(pLower);
     if (isFinancialQuery) {
-        if (toolName === "getClinicStats" || toolName === "getMyAppointments" || toolName === "getPlatformStats" || !toolName) {
-            if (role === "admin" || role === "organization_admin" || role === "super_admin" || role === "doctor") {
+        if (role === "patient") {
+            toolName = "getMyPayments";
+            intent = "GET_MY_PAYMENTS";
+            confidence = Math.max(confidence, 0.9);
+        } else if (role === "admin" || role === "organization_admin" || role === "super_admin" || role === "doctor") {
+            if (toolName === "getClinicStats" || toolName === "getMyAppointments" || toolName === "getPlatformStats" || !toolName) {
                 toolName = "getPaymentStats";
                 intent = "GET_PAYMENT_STATS";
                 confidence = Math.max(confidence, 0.9);
+            }
+        }
+    }
+
+    // Deterministic Availability & Discovery Intent Classification (Phase 3 Patch):
+    // Availability/discovery queries must precede symptom-specialty triage for patient role.
+    const hasActiveBookingSelection = Boolean(
+        agentState?.stage && [
+            "SELECT_DOCTOR",
+            "SELECT_DATE",
+            "SELECT_SLOT",
+            "CONFIRM_BOOKING",
+            "CONFIRMATION_REQUIRED"
+        ].includes(agentState.stage)
+    );
+
+    if (role === "patient" && !hasActiveBookingSelection) {
+        // Exclude personal appointments, prescriptions, and financial inquiries
+        const isPersonalRecordQuery = /\b(my appointments?|next appointment|last appointment|past appointment|previous appointment|my prescriptions?|prescribe|prescribed|my medicines?|my payments?|my records?|who is my doctor|what department is my doctor)\b/i.test(promptMessage);
+
+        if (!isPersonalRecordQuery) {
+            // Rule 2: Preserve Symptom Triage when explicit symptom complaints exist
+            const hasExplicitSymptomComplaint = /\b(i have|i've had|i am having|feeling|suffering from|experiencing|my (?:skin|head|throat|stomach|chest|eye|leg|knee|arm|back|body))\b/i.test(promptMessage) &&
+                /\b(rash|itching|itchy|pain|fever|cough|cold|headache|vomit|nausea|dizz|bleeding|swelling|infection|patches|hurts?|ache|sore)\b/i.test(promptMessage);
+
+            if (!hasExplicitSymptomComplaint) {
+                // Rule 4: Doctor-Specific Availability Query
+                // e.g. "Is Dr. Kumar available tomorrow?", "Does Dr. Sharma have an appointment tomorrow?", "Can I see Dr. Kumar tomorrow?"
+                const docMatch = promptMessage.match(/^(?:is|does|can i see)\s+(?:dr\.?|doctor)\s+([a-zA-Z]+)/i) ||
+                    promptMessage.match(/\bcan i see\s+(?:dr\.?|doctor)\s+([a-zA-Z]+)\b/i) ||
+                    (promptMessage.match(/\b(?:dr\.?|doctor)\s+([A-Z][a-zA-Z]+)\b/) && promptMessage.match(/\b(available|availability|free slots?|open slots?)\b/i));
+
+                if (docMatch && docMatch[1]) {
+                    toolName = "getDoctorAvailability";
+                    intent = "GET_DOCTOR_AVAILABILITY";
+                    confidence = Math.max(confidence, 0.95);
+                    if (!toolArgs.doctorName && !toolArgs.doctorId) {
+                        toolArgs.doctorName = docMatch[1];
+                    }
+                } else {
+                    // Rule 1 & 3: General or Specialty Doctor Availability / Discovery
+                    // e.g. "Which doctors are available tomorrow?", "Show available doctors", "Which dermatologists are available tomorrow?"
+                    const isAvailabilityOrDiscovery = (
+                        /\b(which doctors?|what doctors?|who is available|who can i see tomorrow|find doctors?|search doctors?|show (?:all )?(?:available )?doctors?|list (?:all )?doctors?|available doctors?)\b/i.test(promptMessage) ||
+                        (/\b(doctors?|physicians?|specialists?|dermatologists?|cardiologists?|pediatricians?|gynecologists?|orthopedics?|ophthalmologists?)\b/i.test(promptMessage) &&
+                         /\b(available|availability|free slots?|open slots?|have appointments?)\b/i.test(promptMessage))
+                    );
+
+                    if (isAvailabilityOrDiscovery) {
+                        toolName = "getDoctors";
+                        intent = "GET_DOCTORS";
+                        confidence = Math.max(confidence, 0.95);
+
+                        // Rule 3: Specialty + Availability Extraction
+                        if (/\b(derma[a-z]*|skin)\b/i.test(promptMessage)) toolArgs.specialty = "Dermatology";
+                        else if (/\b(cardio[a-z]*|heart)\b/i.test(promptMessage)) toolArgs.specialty = "Cardiology";
+                        else if (/\b(ortho[a-z]*|bone|joint|knee)\b/i.test(promptMessage)) toolArgs.specialty = "Orthopedics";
+                        else if (/\b(pediatr[a-z]*|child)\b/i.test(promptMessage)) toolArgs.specialty = "Pediatrics";
+                        else if (/\b(gynec[a-z]*|obgyn|women)\b/i.test(promptMessage)) toolArgs.specialty = "Gynecology";
+                        else if (/\b(ophthalm[a-z]*|eye)\b/i.test(promptMessage)) toolArgs.specialty = "Ophthalmology";
+                        else if (/\b(gastro[a-z]*|stomach|digest)\b/i.test(promptMessage)) toolArgs.specialty = "Gastroenterology";
+                        else if (/\b(ent|ear|nose|throat)\b/i.test(promptMessage)) toolArgs.specialty = "ENT";
+                        else if (/\b(general\s+physician|general\s+medicine|internal\s+medicine)\b/i.test(promptMessage)) toolArgs.specialty = "General Medicine";
+                    }
+                }
             }
         }
     }
@@ -595,6 +709,16 @@ export const extractIntent = async (
         resolvedMissing = resolvedMissing.filter(f => !["doctorId", "appointmentDate", "startTime", "endTime"].includes(f));
     }
 
+    if (toolArgs.appointmentDate && !toolArgs.date) {
+        toolArgs.date = toolArgs.appointmentDate;
+    }
+    if (toolArgs.date && !toolArgs.appointmentDate) {
+        toolArgs.appointmentDate = toolArgs.date;
+    }
+    if (toolName === "getDoctorAvailability" && (toolArgs.date || toolArgs.appointmentDate)) {
+        resolvedMissing = resolvedMissing.filter(f => f !== "date" && f !== "appointmentDate");
+    }
+
     // Required fields are reported to the planner, but booking workflow itself may
     // intentionally wait for a user choice rather than treating missing values as an error.
     const required = TOOL_REQUIRED_FIELDS[toolName] || [];
@@ -617,6 +741,7 @@ export const extractIntent = async (
         confidence,
         clarify: Boolean(clarificationQuestion && !toolName),
         clarificationQuestion,
+        requiredCapabilities: Array.isArray(requiredCapabilities) ? requiredCapabilities : [],
         modelUsed: getGeminiModelName()
     };
 };

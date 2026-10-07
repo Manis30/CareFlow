@@ -5,7 +5,7 @@
  */
 
 const INJECTION_PATTERNS = [
-    /ignore\s+(previous|all)\s+instructions/i,
+    /ignore\s+(?:all\s+)?(?:previous|all)\s+instructions/i,
     /disregard\s+(system|safety|security)\s+rules/i,
     /override\s+permissions/i,
     /reveal\s+(all|other)\s+patient/i,

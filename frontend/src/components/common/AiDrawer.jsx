@@ -184,14 +184,14 @@ export const AiDrawer = ({ isOpen: controlledIsOpen, onClose: controlledOnClose 
       const response = await api.post('/ai/gateway', requestPayload);
       const data = response.data?.data;
 
-      // Authoritative Emergency Signal: responseType === "EMERGENCY_ESCALATION" or data?.isEmergency
-      if (data?.responseType === 'EMERGENCY_ESCALATION' || data?.isEmergency || data?.safety?.isEmergency) {
+      // Authoritative Emergency Signal: responseType === "EMERGENCY" / "EMERGENCY_ESCALATION"
+      if (data?.responseType === 'EMERGENCY' || data?.responseType === 'EMERGENCY_ESCALATION' || data?.isEmergency || data?.safety?.isEmergency) {
         setMessages((prev) => [
           ...prev,
           {
             sender: 'ai',
             isEmergency: true,
-            responseType: 'EMERGENCY_ESCALATION',
+            responseType: 'EMERGENCY',
             text: data.aiResponse || data.escalationMessage || "Red-flag clinical symptoms detected. Please contact emergency services (108 / 112 / 911) immediately or proceed to the nearest medical emergency facility."
           }
         ]);
@@ -209,17 +209,37 @@ export const AiDrawer = ({ isOpen: controlledIsOpen, onClose: controlledOnClose 
             citations: data.citations || []
           }
         ]);
-      } else if (data?.responseType === 'ACTION_COMPLETED') {
+      } else if (data?.responseType === 'BOOKING_SUCCESS' || data?.responseType === 'ACTION_COMPLETED') {
         setMessages((prev) => [
           ...prev,
           {
             sender: 'ai',
             text: data.aiResponse || "Your booking has been confirmed and scheduled.",
             citations: data.citations || [],
-            responseType: 'ACTION_COMPLETED'
+            responseType: 'BOOKING_SUCCESS'
           }
         ]);
         window.dispatchEvent(new CustomEvent('careflow:appointment-updated'));
+      } else if (data?.responseType === 'BOOKING_FAILED' || data?.responseType === 'CONFLICT') {
+        setMessages((prev) => [
+          ...prev,
+          {
+            sender: 'ai',
+            isError: true,
+            responseType: 'BOOKING_FAILED',
+            text: data.aiResponse || "The requested booking could not be completed. The appointment slot was not created."
+          }
+        ]);
+      } else if (data?.responseType === 'ERROR') {
+        setMessages((prev) => [
+          ...prev,
+          {
+            sender: 'ai',
+            isError: true,
+            responseType: 'ERROR',
+            text: data.aiResponse || "A clinical processing error occurred. Please retry your request."
+          }
+        ]);
       } else if (
         data?.responseType === 'ANALYTICS' ||
         data?.isAnalytics === true ||
@@ -238,14 +258,16 @@ export const AiDrawer = ({ isOpen: controlledIsOpen, onClose: controlledOnClose 
           }
         ]);
       } else {
-        const responseText = data?.aiResponse || (typeof data?.result === 'string' ? data.result : data?.result?.summary || JSON.stringify(data?.result, null, 2));
+        // Safe Grounded Answer or Clarification
+        const responseText = data?.aiResponse || (typeof data?.result === 'string' ? data.result : data?.result?.summary || (data?.result ? JSON.stringify(data.result, null, 2) : "I couldn't verify that information."));
+        const cleanText = typeof responseText === 'object' ? (responseText.response || JSON.stringify(responseText)) : responseText;
         setMessages((prev) => [
           ...prev,
           {
             sender: 'ai',
-            text: typeof responseText === 'object' ? (responseText.response || JSON.stringify(responseText)) : responseText,
+            text: cleanText,
             citations: data?.citations || data?.result?.citations || [],
-            responseType: data?.responseType || 'live_data'
+            responseType: data?.responseType || 'ANSWER'
           }
         ]);
       }

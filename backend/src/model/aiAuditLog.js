@@ -71,6 +71,18 @@ const aiAuditLogSchema = new mongoose.Schema({
     latencyMs: {
         type: Number,
         default: 0
+    },
+    goal: {
+        type: String,
+        default: null
+    },
+    stepCount: {
+        type: Number,
+        default: 1
+    },
+    errorMessage: {
+        type: String,
+        default: null
     }
 }, {
     timestamps: true

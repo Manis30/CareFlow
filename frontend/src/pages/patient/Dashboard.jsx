@@ -32,6 +32,8 @@ import { formatDate } from '../../utils/formatDate';
 import { formatTime } from '../../utils/formatTime';
 import { resolveDoctorName } from '../../utils/resolveDoctorName';
 import { formatDoctorName } from '../../utils/formatters';
+import TodaysMedication from '../../components/patient/TodaysMedication';
+import ProactiveCareBanner from '../../components/patient/ProactiveCareBanner';
 
 export const PatientDashboard = () => {
   const [upcomingAppts, setUpcomingAppts] = useState([]);
@@ -191,6 +193,9 @@ export const PatientDashboard = () => {
           </Button>
         </div>
       </div>
+
+      {/* Proactive Care Intelligence Alerts */}
+      <ProactiveCareBanner />
 
       {/* 2. Operational Summary Strip (4 Core Patient Health Metrics) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
@@ -427,6 +432,9 @@ export const PatientDashboard = () => {
           </div>
         </div>
       </div>
+
+      {/* Phase 3: Today's Medication Schedule & Adherence */}
+      <TodaysMedication />
 
       {/* 4. Row 2: Recent Prescriptions (6 cols) & Recent Medical Records (6 cols) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-stretch">

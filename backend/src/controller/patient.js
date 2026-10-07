@@ -100,3 +100,60 @@ export const getPatientController = async (req, res) => {
         data: result
     });
 };
+
+export const getMyCareTimelineController = async (req, res, next) => {
+    try {
+        const { getPatientByUserId } = await import("../repository/patient.js");
+        const { getPatientCareTimeline } = await import("../service/patientCare.js");
+        const patient = await getPatientByUserId(req.user.id);
+        if (!patient) {
+            throw new AppError(404, "Patient profile not found");
+        }
+        const data = await getPatientCareTimeline(patient._id);
+        res.status(200).json({
+            success: true,
+            message: "Care timeline fetched successfully",
+            data
+        });
+    } catch (err) {
+        next(err);
+    }
+};
+
+export const getMyProactiveAlertsController = async (req, res, next) => {
+    try {
+        const { getPatientByUserId } = await import("../repository/patient.js");
+        const { getProactivePatientCareAlerts } = await import("../service/patientCare.js");
+        const patient = await getPatientByUserId(req.user.id);
+        if (!patient) {
+            throw new AppError(404, "Patient profile not found");
+        }
+        const data = await getProactivePatientCareAlerts(patient._id);
+        res.status(200).json({
+            success: true,
+            message: "Proactive care alerts fetched successfully",
+            data
+        });
+    } catch (err) {
+        next(err);
+    }
+};
+
+export const getMyFollowUpsController = async (req, res, next) => {
+    try {
+        const { getPatientByUserId } = await import("../repository/patient.js");
+        const { getPatientFollowUpTasks } = await import("../service/patientCare.js");
+        const patient = await getPatientByUserId(req.user.id);
+        if (!patient) {
+            throw new AppError(404, "Patient profile not found");
+        }
+        const data = await getPatientFollowUpTasks(patient._id);
+        res.status(200).json({
+            success: true,
+            message: "Follow-up tasks fetched successfully",
+            data
+        });
+    } catch (err) {
+        next(err);
+    }
+};

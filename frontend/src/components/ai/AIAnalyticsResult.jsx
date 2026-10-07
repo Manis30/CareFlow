@@ -73,6 +73,22 @@ export const AIAnalyticsResult = ({ result, data, summaryText, className = '' })
   // For cancellation, an increase is negative/bad
   const isGoodTrend = isCancellation ? !growth?.isPositive : growth?.isPositive;
 
+  const hasRealAnalytics = Boolean(
+    primaryMetric ||
+    (Array.isArray(supportingMetrics) && supportingMetrics.length > 0) ||
+    trendList.length > 0 ||
+    rankingList.length > 0
+  );
+
+  // If no structured KPI metrics exist, render a clean narrative card without empty charts
+  if (!hasRealAnalytics) {
+    return (
+      <div className={`bg-white border border-slate-200/80 p-4 rounded-2xl rounded-tl-xs shadow-xs text-xs sm:text-sm text-slate-800 leading-relaxed space-y-2 my-2 ${className}`}>
+        <div className="whitespace-pre-line">{narrative || summaryText || "Analytics data processed."}</div>
+      </div>
+    );
+  }
+
   return (
     <div className={`bg-white rounded-2xl border border-slate-200/90 shadow-sm space-y-3.5 my-2 text-slate-800 overflow-hidden ${className}`}>
       {/* 1. Header Bar: Title, Scope Badge & Period */}

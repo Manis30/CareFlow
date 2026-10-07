@@ -32,6 +32,21 @@ import { searchPatientDocuments, getDoctorAuthorizedMedicalRecords } from "./doc
 import { getCachedStats, setCachedStats, invalidateStatsCache } from "./cache.js";
 import { executeHealthcareAnalytics } from "./analyticsService.js";
 import { formatDoctorName } from "../../util/formatters.js";
+import {
+    getMedicationSchedules,
+    proposeScheduleFromPrescription,
+    recordDoseLog,
+    getTodayMedications as getTodayMedsService,
+    calculateAdherence,
+    checkPrescriptionSafety as checkPrescriptionSafetyService,
+    doctorApproveMedicationSchedule
+} from "../medication.js";
+import {
+    getPatientCareTimeline as getPatientCareTimelineService,
+    getProactivePatientCareAlerts,
+    createFollowUpTask as createFollowUpTaskService,
+    getPatientFollowUpTasks
+} from "../patientCare.js";
 
 
 
@@ -165,6 +180,43 @@ export const TOOL_DEFINITIONS = {
                 organizationId: orgId,
                 doctors
             };
+        }
+    },
+    getDoctors: {
+        name: "getDoctors",
+        description: "Discover doctors available in clinic/organization, optionally filtered by specialty or date.",
+        allowedRoles: ["patient", "doctor", "admin", "super_admin"],
+        isWrite: false,
+        execute: async (user, args = {}) => {
+            const searchRes = await TOOL_DEFINITIONS.searchDoctors.execute(user, args);
+            const targetDate = args.date || args.appointmentDate || null;
+            if (targetDate && Array.isArray(searchRes.doctors) && searchRes.doctors.length > 0) {
+                const availabilityList = [];
+                for (const doc of searchRes.doctors) {
+                    try {
+                        const docIdStr = String(doc._id || doc.id || doc.doctorId || "");
+                        if (!docIdStr) continue;
+                        const slotsRes = await getDoctorAvailableSlotsService(docIdStr, targetDate, user?.id || user?._id);
+                        availabilityList.push({
+                            ...doc,
+                            doctorId: docIdStr,
+                            date: targetDate,
+                            day: slotsRes.day,
+                            isAvailable: slotsRes.isAvailable,
+                            slotCount: (slotsRes.slots || []).length,
+                            availableSlots: (slotsRes.slots || []).slice(0, 8)
+                        });
+                    } catch (_) {
+                        availabilityList.push(doc);
+                    }
+                }
+                return {
+                    ...searchRes,
+                    date: targetDate,
+                    doctors: availabilityList
+                };
+            }
+            return searchRes;
         }
     },
     getDoctorAvailability: {
@@ -486,8 +538,9 @@ export const TOOL_DEFINITIONS = {
         description: "Retrieve appointments for the logged in patient or doctor.",
         allowedRoles: ["patient", "doctor", "admin"],
         isWrite: false,
-        execute: async (user) => {
-            return await getMyAppointmentsService(user.id, user.role);
+        execute: async (user, args = {}) => {
+            const statusFilter = typeof args === "string" ? args : (args?.status || null);
+            return await getMyAppointmentsService(user.id || user._id, user.role, statusFilter);
         }
     },
     createAppointmentHold: {
@@ -605,7 +658,7 @@ export const TOOL_DEFINITIONS = {
                     payload: args
                 };
             }
-            return await cancelAppointmentService(args.appointmentId, user.id, user.role, args.cancelReason || "Cancelled via CareFlow AI");
+            return await cancelAppointmentService(args.appointmentId, user.id || user._id, user.role, args.cancelReason || "Cancelled via CareFlow AI");
         }
     },
     rescheduleAppointment: {
@@ -623,7 +676,7 @@ export const TOOL_DEFINITIONS = {
                     payload: args
                 };
             }
-            return await rescheduleAppointmentService(args.appointmentId, user.id, user.role, args);
+            return await rescheduleAppointmentService(args.appointmentId, user.id || user._id, user.role, args);
         }
     },
     searchMyDocuments: {
@@ -651,9 +704,9 @@ export const TOOL_DEFINITIONS = {
                 });
             }
             if (args?.appointmentId) {
-                return await getMedicalRecordsByAppointmentService(args.appointmentId, user.id, user.role);
+                return await getMedicalRecordsByAppointmentService(args.appointmentId, user.id || user._id, user.role);
             }
-            return await getMyMedicalRecordsService(user.id, user.role);
+            return await getMyMedicalRecordsService(user.id || user._id, user.role);
         }
     },
     getMyPrescriptions: {
@@ -684,6 +737,15 @@ export const TOOL_DEFINITIONS = {
             }
 
             return sortedList;
+        }
+    },
+    getMyPayments: {
+        name: "getMyPayments",
+        description: "Retrieve payment history and payments made by the authenticated patient.",
+        allowedRoles: ["patient"],
+        isWrite: false,
+        execute: async (user) => {
+            return await getMyPaymentsService(user.id || user._id);
         }
     },
     explainMyPrescriptions: {
@@ -761,6 +823,88 @@ export const TOOL_DEFINITIONS = {
                 context: formattedPrescriptions,
                 prescriptions: targetList
             };
+        }
+    },
+
+    getPatientCareTimeline: {
+        name: "getPatientCareTimeline",
+        description: "Retrieve chronological patient care timeline of visits, prescriptions, and medical records.",
+        allowedRoles: ["patient", "doctor"],
+        isWrite: false,
+        execute: async (user, args = {}) => {
+            return await getPatientCareTimelineService(user, args.patientId);
+        }
+    },
+    getTodayMedications: {
+        name: "getTodayMedications",
+        description: "Retrieve current and today's scheduled medications with dosage and adherence status.",
+        allowedRoles: ["patient", "doctor"],
+        isWrite: false,
+        execute: async (user, args = {}) => {
+            return await getTodayMedsService(user, args.date ? new Date(args.date) : new Date());
+        }
+    },
+    getMedicationAdherence: {
+        name: "getMedicationAdherence",
+        description: "Calculate patient medication adherence percentage from recorded dose logs.",
+        allowedRoles: ["patient", "doctor"],
+        isWrite: false,
+        execute: async (user, args = {}) => {
+            return await calculateAdherence(user, args.patientId);
+        }
+    },
+    getProactivePatientCare: {
+        name: "getProactivePatientCare",
+        description: "Retrieve proactive care alerts including upcoming visits, overdue medications, and pending items.",
+        allowedRoles: ["patient"],
+        isWrite: false,
+        execute: async (user) => {
+            return await getProactivePatientCareAlerts(user);
+        }
+    },
+    getFollowUpCare: {
+        name: "getFollowUpCare",
+        description: "Retrieve recommended clinical follow-up consultations.",
+        allowedRoles: ["patient", "doctor"],
+        isWrite: false,
+        execute: async (user) => {
+            return await getPatientFollowUpTasks(user);
+        }
+    },
+    logDose: {
+        name: "logDose",
+        description: "Log a medication dose status (TAKEN, MISSED, SKIPPED, or SNOOZED).",
+        allowedRoles: ["patient", "doctor"],
+        isWrite: true,
+        execute: async (user, args, confirmed = false) => {
+            if (!confirmed) {
+                return {
+                    confirmation_required: true,
+                    action: "logDose",
+                    toolName: "logDose",
+                    summary: `Confirm recording medication dose for schedule ${args.scheduleId} as ${args.status || 'TAKEN'}.`,
+                    payload: args
+                };
+            }
+            return await recordDoseLog(user, args);
+        }
+    },
+    proposeMedicationSchedule: {
+        name: "proposeMedicationSchedule",
+        description: "Extract and propose a structured medication schedule from an existing prescription.",
+        allowedRoles: ["patient", "doctor"],
+        isWrite: false,
+        execute: async (user, args = {}) => {
+            return await proposeScheduleFromPrescription(user, args.prescriptionId);
+        }
+    },
+    checkPrescriptionSafety: {
+        name: "checkPrescriptionSafety",
+        description: "Perform clinical safety verification (duplicate check and documented allergy conflict) on prescriptions.",
+        allowedRoles: ["doctor", "admin"],
+        isWrite: false,
+        execute: async (user, args = {}) => {
+            return await checkPrescriptionSafetyService(user, args);
         }
     },
 
@@ -1508,10 +1652,50 @@ export const TOOL_DEFINITIONS = {
             }
 
             if (!targetDoctorId) {
+                const UserRepo = await import("../../repository/user.js");
+                let orgId = user.organizationId?._id || user.organizationId;
+                if (!orgId && user.role !== "super_admin") {
+                    const userDoc = await UserRepo.getUserById(user.id || user._id);
+                    orgId = userDoc?.organizationId?._id || userDoc?.organizationId;
+                }
+                const filter = orgId ? { organizationId: orgId } : {};
+                const doctors = await DoctorModel.find(filter).populate("userId", "name").lean();
+                const queryDate = args.date || args.appointmentDate || null;
+
+                if (queryDate) {
+                    const targetDateObj = new Date(queryDate + (queryDate.includes("T") ? "" : "T00:00:00.000Z"));
+                    const onLeaveDoctors = doctors.filter(d => {
+                        const lList = Array.isArray(d.leave) ? d.leave : [];
+                        return lList.some(l => {
+                            const s = new Date(l.startDate);
+                            const e = new Date(l.endDate);
+                            s.setHours(0, 0, 0, 0);
+                            e.setHours(23, 59, 59, 999);
+                            return targetDateObj >= s && targetDateObj <= e;
+                        });
+                    });
+
+                    return {
+                        success: true,
+                        queryDate,
+                        totalDoctorsOnLeave: onLeaveDoctors.length,
+                        doctorsOnLeave: onLeaveDoctors.map(d => ({
+                            doctorId: String(d._id),
+                            doctorName: formatDoctorName(d.userId?.name) || "Doctor",
+                            leave: d.leave
+                        }))
+                    };
+                }
+
+                const doctorsWithLeave = doctors.filter(d => Array.isArray(d.leave) && d.leave.length > 0);
                 return {
-                    success: false,
-                    message: "Please specify which doctor's leave schedule you would like to view.",
-                    leave: []
+                    success: true,
+                    totalDoctorsWithLeave: doctorsWithLeave.length,
+                    doctorsOnLeave: doctorsWithLeave.map(d => ({
+                        doctorId: String(d._id),
+                        doctorName: formatDoctorName(d.userId?.name) || "Doctor",
+                        leave: d.leave
+                    }))
                 };
             }
 
@@ -1594,6 +1778,102 @@ export const TOOL_DEFINITIONS = {
                 organizationName: orgName,
                 message: `You are assigned to the ${deptName} department as a specialist in ${specialty} at ${orgName}.`
             };
+        }
+    },
+
+    // Phase 3: Patient Intelligence & Medication Tools
+    getPatientCareTimeline: {
+        name: "getPatientCareTimeline",
+        description: "Retrieve chronological patient care timeline of visits, prescriptions, and medical records.",
+        allowedRoles: ["patient", "doctor", "admin", "super_admin"],
+        isWrite: false,
+        execute: async (user, args = {}) => {
+            return await getPatientCareTimelineService(user, args.patientId || null);
+        }
+    },
+    getTodayMedications: {
+        name: "getTodayMedications",
+        description: "Retrieve patient's scheduled medications and dose adherence status for today.",
+        allowedRoles: ["patient", "doctor", "admin", "super_admin"],
+        isWrite: false,
+        execute: async (user, args = {}) => {
+            return await getTodayMedsService(user, args.date ? new Date(args.date) : new Date());
+        }
+    },
+    getMedicationAdherence: {
+        name: "getMedicationAdherence",
+        description: "Calculate patient medication adherence percentage strictly from dose logs.",
+        allowedRoles: ["patient", "doctor", "admin", "super_admin"],
+        isWrite: false,
+        execute: async (user, args = {}) => {
+            return await calculateAdherence(user, args.patientId || null);
+        }
+    },
+    getProactivePatientCare: {
+        name: "getProactivePatientCare",
+        description: "Surface proactive healthcare alerts (upcoming appointments, due meds, follow-up care, pending bills).",
+        allowedRoles: ["patient", "doctor", "admin", "super_admin"],
+        isWrite: false,
+        execute: async (user) => {
+            return await getProactivePatientCareAlerts(user);
+        }
+    },
+    getFollowUpCare: {
+        name: "getFollowUpCare",
+        description: "Retrieve doctor-recommended follow-up care tasks and visit instructions.",
+        allowedRoles: ["patient", "doctor", "admin", "super_admin"],
+        isWrite: false,
+        execute: async (user, args = {}) => {
+            return await getPatientFollowUpTasks(user, args.patientId || null);
+        }
+    },
+    logDose: {
+        name: "logDose",
+        description: "Record patient medication dose action (TAKEN, SNOOZED, MISSED, SKIPPED).",
+        allowedRoles: ["patient"],
+        isWrite: true,
+        execute: async (user, args = {}) => {
+            return await recordDoseLog(user, {
+                scheduleId: args.scheduleId || args.medicationScheduleId,
+                status: args.status || "TAKEN",
+                scheduledTime: args.scheduledTime,
+                notes: args.notes || args.note,
+                snoozedUntil: args.snoozedUntil
+            });
+        }
+    },
+    proposeMedicationSchedule: {
+        name: "proposeMedicationSchedule",
+        description: "Extract proposed structured medication schedule from prescription for doctor review.",
+        allowedRoles: ["patient", "doctor", "admin", "super_admin"],
+        isWrite: false,
+        execute: async (user, args = {}) => {
+            return await proposeScheduleFromPrescription(user, args.prescriptionId);
+        }
+    },
+    checkPrescriptionSafety: {
+        name: "checkPrescriptionSafety",
+        description: "Perform clinical safety verification (duplicate active meds, allergy conflict from patient record).",
+        allowedRoles: ["doctor", "admin", "super_admin"],
+        isWrite: false,
+        execute: async (user, args = {}) => {
+            return await checkPrescriptionSafetyService(user, {
+                patientId: args.patientId,
+                medicines: args.medicines || []
+            });
+        }
+    },
+    doctorApproveMedicationSchedule: {
+        name: "doctorApproveMedicationSchedule",
+        description: "Approve, edit, or reject a proposed medication schedule. Doctor only.",
+        allowedRoles: ["doctor", "admin", "super_admin"],
+        isWrite: true,
+        execute: async (user, args = {}) => {
+            return await doctorApproveMedicationSchedule(user, args.scheduleId, {
+                approved: args.action === "APPROVE" || args.approved === true,
+                edits: args.edits || { instructions: args.instructions },
+                rejectionReason: args.rejectionReason
+            });
         }
     }
 };

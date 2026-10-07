@@ -1,4 +1,5 @@
 import { AppError } from "../../../middleware/errorHandler.js";
+import { normalizeRole } from "../roleNormalizer.js";
 
 /**
  * BaseAgent: Foundational contract for CareFlow Specialized Agents.
@@ -14,7 +15,7 @@ export class BaseAgent {
         this.name = name;
         this.type = type;
         this.description = description;
-        this.allowedRoles = new Set(allowedRoles);
+        this.allowedRoles = new Set(allowedRoles.map(r => normalizeRole(r)));
         this.tools = new Set(tools);
         this.disclaimer = disclaimer;
     }
@@ -24,12 +25,16 @@ export class BaseAgent {
     }
 
     isRoleAllowed(role) {
-        const canonicalRole = role === "organization_admin" ? "admin" : role;
-        return this.allowedRoles.has(canonicalRole);
+        try {
+            const canonicalRole = normalizeRole(role);
+            return this.allowedRoles.has(canonicalRole);
+        } catch {
+            return false;
+        }
     }
 
     validateAuthorization(user, toolName = null) {
-        const userRole = user?.role || "patient";
+        const userRole = normalizeRole(user?.role);
         if (!this.isRoleAllowed(userRole)) {
             throw new AppError(403, `Access denied: Role '${userRole}' is not authorized to use ${this.name} (${this.type}).`);
         }

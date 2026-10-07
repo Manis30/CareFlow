@@ -159,7 +159,7 @@ export const resolveEntitiesFromToolArgs = async (toolArgs = {}, organizationId 
             } else if (listMatches.length > 1) {
                 missingRequiredFields.push("doctorId");
                 const choices = listMatches.map(d => formatDoctorName(d.name || d.doctorName)).join(", ");
-                clarificationQuestion = `We found multiple doctors matching "${doctorNameInput}": ${choices}. Which doctor would you like to book with?`;
+                clarificationQuestion = `I found ${listMatches.length} doctors matching "${doctorNameInput}": ${choices}. Please choose one.`;
             } else {
                 // If not in current list, search the database across accredited clinics
                 const cleanSearchName = String(doctorNameInput)
@@ -200,7 +200,7 @@ export const resolveEntitiesFromToolArgs = async (toolArgs = {}, organizationId 
                         return `${formatDoctorName(name)} (${deptName})`;
                     }).join(", ");
 
-                    clarificationQuestion = `We found multiple doctors matching "${doctorNameInput}": ${choices}. Which doctor would you like to book with?`;
+                    clarificationQuestion = `I found ${matchedDoctors.length} doctors matching "${doctorNameInput}": ${choices}. Please choose one.`;
                 } else if (matchedDoctors.length === 0) {
                     missingRequiredFields.push("doctorId");
                     clarificationQuestion = `We couldn't find a doctor matching "${doctorNameInput}". Would you like to view all available doctors?`;
@@ -247,7 +247,7 @@ export const resolveEntitiesFromToolArgs = async (toolArgs = {}, organizationId 
                     return `${formatDoctorName(name)} (${deptName})`;
                 }).join(", ");
 
-                clarificationQuestion = `We found multiple doctors matching "${doctorNameInput}": ${choices}. Which doctor would you like to book with?`;
+                clarificationQuestion = `I found ${matchedDoctors.length} doctors matching "${doctorNameInput}": ${choices}. Please choose one.`;
             } else if (matchedDoctors.length === 0) {
                 missingRequiredFields.push("doctorId");
                 clarificationQuestion = `We couldn't find a doctor matching "${doctorNameInput}". Would you like to view all available doctors?`;
@@ -332,25 +332,30 @@ export const resolveEntitiesFromToolArgs = async (toolArgs = {}, organizationId 
 
                     if (patientNameHint && upcomingAppointments.length > 0) {
                         const lowerHint = patientNameHint.toLowerCase();
-                        const nameMatch = upcomingAppointments.find(a => {
+                        const nameMatches = upcomingAppointments.filter(a => {
                             const pName = (a.patientId?.userId?.name || "").toLowerCase();
                             return pName.includes(lowerHint);
                         });
-                        if (nameMatch) {
-                            args.appointmentId = String(nameMatch._id);
-                            args.patientId = String(nameMatch.patientId?._id || nameMatch.patientId);
-                            args.patientName = nameMatch.patientId?.userId?.name || args.patientName;
+                        if (nameMatches.length === 1) {
+                            args.appointmentId = String(nameMatches[0]._id);
+                            args.patientId = String(nameMatches[0].patientId?._id || nameMatches[0].patientId);
+                            args.patientName = nameMatches[0].patientId?.userId?.name || args.patientName;
+                        } else if (nameMatches.length > 1) {
+                            missingRequiredFields.push("appointmentId");
+                            const choices = nameMatches.map((a, i) => `${i + 1}. ${a.patientId?.userId?.name || 'Patient'} (${new Date(a.appointmentDate).toISOString().split('T')[0]} at ${a.startTime})`).join("\n");
+                            clarificationQuestion = `I found ${nameMatches.length} appointments matching "${patientNameHint}":\n${choices}\nPlease select one.`;
+                        } else {
+                            missingRequiredFields.push("appointmentId");
+                            clarificationQuestion = `I couldn't find an appointment for a patient named "${patientNameHint}".`;
                         }
-                    }
-
-                    if (!args.appointmentId && upcomingAppointments.length > 0) {
+                    } else if (!args.appointmentId && !patientNameHint && upcomingAppointments.length > 0) {
                         args.appointmentId = String(upcomingAppointments[0]._id);
                         args.patientId = String(upcomingAppointments[0].patientId?._id || upcomingAppointments[0].patientId);
                         args.patientName = upcomingAppointments[0].patientId?.userId?.name || args.patientName;
                     }
 
                     // If no upcoming appointment found with date >= today, check for any active scheduled/booked appointment
-                    if (!args.appointmentId) {
+                    if (!args.appointmentId && !patientNameHint) {
                         const anyActiveAppts = await AppointmentModel.find({
                             doctorId: DoctorRecord._id,
                             status: { $nin: ["CANCELLED", "cancelled"] }
@@ -369,7 +374,9 @@ export const resolveEntitiesFromToolArgs = async (toolArgs = {}, organizationId 
 
                     if (!args.appointmentId && (toolNameHint === "summarizeAppointmentContext" || requiresAppointment)) {
                         missingRequiredFields.push("appointmentId");
-                        clarificationQuestion = "You do not have any upcoming appointments scheduled on your calendar at this time.";
+                        clarificationQuestion = patientNameHint
+                            ? `I couldn't find an appointment for "${patientNameHint}" on your calendar.`
+                            : "You do not have any upcoming appointments scheduled on your calendar at this time.";
                     }
                 }
             }

@@ -4,6 +4,7 @@ import dbconnection from './config/db.js';
 import initSocket from './config/socket.js';
 import dotenv from 'dotenv';
 import { autoCompleteExpiredAppointments } from './service/appointment.js';
+import { startProactiveScheduler } from './service/scheduler/proactiveScheduler.js';
 dotenv.config();
 
 const startServer = async () => {
@@ -21,6 +22,9 @@ const startServer = async () => {
         setInterval(() => {
             autoCompleteExpiredAppointments();
         }, 60000);
+
+        // Start Phase 3 Proactive Scheduler (cron + MongoDB distributed lock)
+        startProactiveScheduler();
     } catch (error) {
         console.log(`Server startup failed: ${error.message}`);
         process.exit(1);

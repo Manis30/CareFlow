@@ -1,21 +1,22 @@
-import { screenEmergencySymptoms } from "../deterministicSafety.js";
+import { screenEmergencySymptoms, screenMedicationMissedDoseSafety } from "../deterministicSafety.js";
 import { sanitizeUntrustedInput } from "../promptProtection.js";
 import { checkGroundingGuardrail } from "../groundingGuardrail.js";
 import { planWorkflowStep } from "./workflowPlanner.js";
-import { executeOrchestratedTool } from "./toolExecutor.js";
+import { executeOrchestratedTool, computeToolFingerprint } from "./toolExecutor.js";
 import { resolveBookingState } from "./bookingStateResolver.js";
 import AIAuditLogModel from "../../../model/aiAuditLog.js";
 import { saveAIChatMessageService, getAIChatHistoryService, PURE_DATA_TOOLS, templatePureDataResponse } from "../aiGateway.js";
 import { createPendingConfirmation, consumePendingConfirmation } from "../pendingConfirmation.js";
+import { normalizeRole } from "../roleNormalizer.js";
 import { getAgentForTool } from "../agents/index.js";
 import { formatDoctorName } from "../../../util/formatters.js";
 import { generateStructuredContent } from "../geminiClient.js";
+import { buildCanonicalResponse, RESPONSE_TYPES, normalizeResponseType } from "../responseContract.js";
 
 const ROLE_AGENT_MAPPING = {
     patient: "AppointmentAgent",
     doctor: "ClinicalIntelligenceAgent",
     admin: "ClinicOperationsAgent",
-    organization_admin: "ClinicOperationsAgent",
     super_admin: "AnalyticsAgent"
 };
 
@@ -35,7 +36,7 @@ const resolveDisclaimer = (toolName) => {
     return "CareFlow AI assistance is grounded in authorized CareFlow data.";
 };
 
-const MAX_STEPS = Number(process.env.AI_AGENT_MAX_STEPS || 8);
+const MAX_STEPS = Number(process.env.AI_AGENT_MAX_STEPS || 6);
 
 const buildConversationContext = (messages = [], maxTurns = 8) => {
     if (!messages?.length) return "";
@@ -225,11 +226,17 @@ Synthesize a clear, grounded response addressing the user's inquiry strictly bas
     }, responseType);
 };
 
-const makePayload = (base, responseType = "LIVE_DATA") => ({
-    success: true,
-    ...base,
-    responseType
-});
+const makePayload = (base, responseType = "LIVE_DATA") => {
+    const canonicalType = normalizeResponseType(responseType);
+    return buildCanonicalResponse({
+        ...base,
+        responseType: canonicalType,
+        metadata: {
+            ...(base.metadata || {}),
+            legacyType: responseType
+        }
+    });
+};
 
 /**
  * Real result-aware CareFlow agent.
@@ -253,16 +260,24 @@ const makePayload = (base, responseType = "LIVE_DATA") => ({
  */
 export const runOrchestratedWorkflow = async (user, requestData = {}) => {
     const startTime = Date.now();
-    const userRole = user?.role || "patient";
+    let userRole = "patient";
+    try {
+        userRole = normalizeRole(user?.role);
+    } catch {
+        return buildCanonicalResponse({
+            responseType: RESPONSE_TYPES.ERROR,
+            statusCode: 403,
+            aiResponse: "Access denied. CareFlow AI is available only to Patient, Doctor, Admin, and Super Admin roles."
+        });
+    }
     const agentType = ROLE_AGENT_MAPPING[userRole];
 
     if (!agentType) {
-        return {
-            success: false,
-            responseType: "ERROR",
-            error: "UNAUTHORIZED_ROLE",
-            aiResponse: "Access denied. CareFlow AI is available only to Patient, Doctor, Organization Admin, and Super Admin roles."
-        };
+        return buildCanonicalResponse({
+            responseType: RESPONSE_TYPES.ERROR,
+            statusCode: 403,
+            aiResponse: "Access denied. CareFlow AI is available only to Patient, Doctor, Admin, and Super Admin roles."
+        });
     }
 
     const userId = user?._id || user?.id;
@@ -300,16 +315,15 @@ export const runOrchestratedWorkflow = async (user, requestData = {}) => {
     if (userRole === "patient" && rawPrompt) {
         const emergencyResult = screenEmergencySymptoms(rawPrompt);
         if (emergencyResult.isEmergency) {
-            const response = {
-                success: true,
+            const response = buildCanonicalResponse({
+                responseType: RESPONSE_TYPES.EMERGENCY,
                 agentType,
-                responseType: "EMERGENCY_ESCALATION",
                 aiResponse: emergencyResult.escalationMessage,
-                safety: {
+                metadata: {
                     isEmergency: true,
                     detectedKeyword: emergencyResult.detectedKeyword
                 }
-            };
+            });
 
             await AIAuditLogModel.create({
                 userId,
@@ -333,22 +347,55 @@ export const runOrchestratedWorkflow = async (user, requestData = {}) => {
         }
     }
 
+    // Medication Missed-Dose Clinical Safety Check (Rule 15)
+    if (rawPrompt) {
+        const missedDoseSafety = screenMedicationMissedDoseSafety(rawPrompt);
+        if (missedDoseSafety && missedDoseSafety.triggered) {
+            const response = buildCanonicalResponse({
+                responseType: RESPONSE_TYPES.ANSWER,
+                agentType,
+                aiResponse: missedDoseSafety.warning,
+                metadata: {
+                    isMissedDoseQuery: true
+                }
+            });
+
+            await AIAuditLogModel.create({
+                userId,
+                organizationId: orgId,
+                role: userRole,
+                agentType,
+                promptSummary: rawPrompt.slice(0, 100),
+                status: "SUCCESS",
+                modelUsed: "DeterministicClinicalSafety",
+                latencyMs: Date.now() - startTime
+            }).catch(() => {});
+
+            await saveAssistantMessage(userId, orgId, {
+                role: "assistant",
+                text: response.aiResponse,
+                responseType: "CLINICAL_SAFETY_ALERT"
+            });
+
+            return response;
+        }
+    }
+
     // Confirmation path: server-side verified single-use execution.
     // Client MUST supply confirmationId. Client CANNOT supply arbitrary toolName or toolArgs.
     if (confirmed) {
         const confirmationId = requestData?.confirmationId;
         if (!confirmationId) {
-            return {
-                success: false,
+            return buildCanonicalResponse({
+                responseType: RESPONSE_TYPES.ERROR,
                 agentType,
-                responseType: "ERROR",
                 statusCode: 400,
                 aiResponse: "A valid server-side confirmationId is required to complete this action."
-            };
+            });
         }
 
         try {
-            const pendingAction = consumePendingConfirmation(confirmationId, userId);
+            const pendingAction = await consumePendingConfirmation(confirmationId, userId);
 
             const execution = await executeOrchestratedTool(
                 user,
@@ -412,13 +459,12 @@ export const runOrchestratedWorkflow = async (user, requestData = {}) => {
                 latencyMs: Date.now() - startTime
             }).catch(() => {});
 
-            return {
-                success: false,
+            return buildCanonicalResponse({
+                responseType: status === 409 ? RESPONSE_TYPES.BOOKING_FAILED : RESPONSE_TYPES.ERROR,
                 agentType,
-                responseType: status === 409 ? "CONFLICT" : "ERROR",
                 statusCode: status,
                 aiResponse: error.message || "Confirmation failed."
-            };
+            });
         }
     }
 
@@ -590,7 +636,7 @@ export const runOrchestratedWorkflow = async (user, requestData = {}) => {
                     reasonForVisit: agentState?.symptoms || agentState?.reasonForVisit || agentState?.reason || "Appointment requested through CareFlow AI"
                 };
 
-                const pending = createPendingConfirmation({
+                const pending = await createPendingConfirmation({
                     userId,
                     role: userRole,
                     organizationId: orgId,
@@ -675,6 +721,7 @@ export const runOrchestratedWorkflow = async (user, requestData = {}) => {
 
     let currentPrompt = promptMessage;
     let latestPlan = null;
+    const executedFingerprints = new Set();
 
     for (let step = 0; step < MAX_STEPS; step++) {
         try {
@@ -731,7 +778,7 @@ export const runOrchestratedWorkflow = async (user, requestData = {}) => {
                     reasonForVisit: agentState?.symptoms || agentState?.reasonForVisit || agentState?.reason || latestPlan.toolArgs?.reasonForVisit || "Appointment requested through CareFlow AI"
                 };
 
-                const pending = createPendingConfirmation({
+                const pending = await createPendingConfirmation({
                     userId,
                     role: userRole,
                     organizationId: orgId,
@@ -830,13 +877,24 @@ export const runOrchestratedWorkflow = async (user, requestData = {}) => {
         }
 
         if (!latestPlan.toolName) {
-            return {
-                success: false,
+            return buildCanonicalResponse({
+                responseType: RESPONSE_TYPES.ERROR,
                 agentType,
-                responseType: "ERROR",
                 aiResponse: "I couldn't determine a safe CareFlow action for that request."
-            };
+            });
         }
+
+        const fingerprint = computeToolFingerprint(latestPlan.toolName, latestPlan.toolArgs);
+        const isRepeatException = latestPlan.confirmed ||
+            latestPlan.toolArgs?.forceRefresh === true ||
+            latestPlan.toolName === "createAppointmentHold" ||
+            latestPlan.toolName === "validateAppointmentSlot";
+
+        if (executedFingerprints.has(fingerprint) && !isRepeatException) {
+            console.log(`[AgentOrchestrator] Duplicate tool execution protected: ${fingerprint}`);
+            break;
+        }
+        executedFingerprints.add(fingerprint);
 
         let execution;
         try {
@@ -847,6 +905,22 @@ export const runOrchestratedWorkflow = async (user, requestData = {}) => {
                 false
             );
         } catch (error) {
+            const obs = error.observation || {
+                toolName: latestPlan.toolName,
+                success: false,
+                data: null,
+                error: error.message,
+                source: "CareFlow Service Layer",
+                metadata: {}
+            };
+            toolTrace.push({
+                step: step + 1,
+                toolName: latestPlan.toolName,
+                args: latestPlan.toolArgs || {},
+                result: null,
+                observation: obs
+            });
+
             await AIAuditLogModel.create({
                 userId,
                 organizationId: orgId,
@@ -855,23 +929,25 @@ export const runOrchestratedWorkflow = async (user, requestData = {}) => {
                 promptSummary: rawPrompt.slice(0, 100),
                 toolUsed: latestPlan.toolName,
                 toolArgs: latestPlan.toolArgs,
+                stepCount: step + 1,
                 status: "ERROR",
                 errorMessage: error.message,
                 modelUsed: latestPlan.modelUsed,
                 latencyMs: Date.now() - startTime
             }).catch(() => {});
 
-            return {
-                success: false,
+            return buildCanonicalResponse({
+                responseType: RESPONSE_TYPES.ERROR,
                 agentType,
-                responseType: "ERROR",
                 toolUsed: latestPlan.toolName,
-                aiResponse: `I couldn't complete that CareFlow operation safely: ${error.message}`
-            };
+                toolObservations: toolTrace.map(t => t.observation),
+                aiResponse: `I couldn't complete that CareFlow operation safely: ${error.message}`,
+                statusCode: error.statusCode || 500
+            });
         }
 
         if (execution.requiresConfirmation) {
-            const pending = createPendingConfirmation({
+            const pending = await createPendingConfirmation({
                 userId,
                 role: userRole,
                 organizationId: orgId,
@@ -881,10 +957,9 @@ export const runOrchestratedWorkflow = async (user, requestData = {}) => {
                 summary: execution.summary
             });
 
-            const confirmation = {
-                success: true,
+            const confirmation = buildCanonicalResponse({
+                responseType: RESPONSE_TYPES.CONFIRMATION_REQUIRED,
                 agentType,
-                responseType: "CONFIRMATION_REQUIRED",
                 aiResponse: execution.summary,
                 requiresConfirmation: true,
                 confirmationRequired: true,
@@ -893,8 +968,9 @@ export const runOrchestratedWorkflow = async (user, requestData = {}) => {
                 toolName: latestPlan.toolName,
                 payload: execution.payload,
                 summary: execution.summary,
-                result: execution
-            };
+                result: execution,
+                agentState
+            });
 
             await saveAssistantMessage(userId, orgId, {
                 role: "assistant",
@@ -919,7 +995,8 @@ export const runOrchestratedWorkflow = async (user, requestData = {}) => {
             step: step + 1,
             toolName: latestPlan.toolName,
             args: latestPlan.toolArgs || {},
-            result
+            result,
+            observation: execution.observation
         });
 
         // Keep the semantic state synchronized with authoritative observations.
@@ -936,7 +1013,7 @@ export const runOrchestratedWorkflow = async (user, requestData = {}) => {
                 doctors: result?.doctors || agentState?.doctors
             };
         }
-        if (latestPlan.toolName === "searchDoctors" && Array.isArray(result?.doctors)) {
+        if ((latestPlan.toolName === "searchDoctors" || latestPlan.toolName === "getDoctors") && Array.isArray(result?.doctors)) {
             agentState = {
                 ...(agentState || {}),
                 stage: "SELECT_DOCTOR",
@@ -992,11 +1069,10 @@ export const runOrchestratedWorkflow = async (user, requestData = {}) => {
         return synthesized;
     }
 
-    return {
-        success: false,
+    return buildCanonicalResponse({
+        responseType: RESPONSE_TYPES.ERROR,
         agentType,
-        responseType: "ERROR",
         aiResponse: "I couldn't safely complete the request within the agent's step limit. Please continue from the last confirmed step.",
         agentState
-    };
+    });
 };

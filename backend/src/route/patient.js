@@ -5,7 +5,10 @@ import {
     createPatientController,
     getMyPatientProfileController,
     updateMyPatientProfileController,
-    getPatientController
+    getPatientController,
+    getMyCareTimelineController,
+    getMyProactiveAlertsController,
+    getMyFollowUpsController
 } from "../controller/patient.js";
 import upload from "../middleware/upload.js";
 
@@ -22,6 +25,27 @@ route.get(
     authentication,
     authorization("patient"),
     getMyPatientProfileController
+);
+
+route.get(
+    "/care-timeline",
+    authentication,
+    authorization("patient"),
+    getMyCareTimelineController
+);
+
+route.get(
+    "/proactive-alerts",
+    authentication,
+    authorization("patient"),
+    getMyProactiveAlertsController
+);
+
+route.get(
+    "/follow-ups",
+    authentication,
+    authorization("patient"),
+    getMyFollowUpsController
 );
 
 route.patch(
