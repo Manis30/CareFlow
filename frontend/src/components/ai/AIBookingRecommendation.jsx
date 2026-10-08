@@ -22,7 +22,7 @@ export const AIBookingRecommendation = ({
   const clinicName = payload.clinicName || payload.organizationName || 'CareFlow Clinic';
   const dateStr = payload.appointmentDate || payload.date || 'Preferred Date';
   const timeStr = payload.startTime ? `${payload.startTime} - ${payload.endTime || ''}` : 'Scheduled Slot';
-  const typeStr = payload.consultationType || 'online';
+  const typeStr = payload.consultationType || 'offline';
   const reasonStr = payload.reason || payload.symptoms || null;
 
   return (

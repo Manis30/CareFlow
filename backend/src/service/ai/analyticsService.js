@@ -26,12 +26,22 @@ export const parseDatePeriod = (dateRangeType = 'this_month', customStart = null
     const lower = String(dateRangeType || '').toLowerCase();
 
     if (customStart || customEnd) {
-        start = customStart ? new Date(customStart) : new Date(now.getFullYear(), 0, 1);
-        start.setHours(0, 0, 0, 0);
-        end = customEnd ? new Date(customEnd) : new Date(now);
-        end.setHours(23, 59, 59, 999);
-        label = `${start.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} - ${end.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
-        type = 'custom';
+        if (customStart && typeof customStart === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(customStart)) {
+            const [y, m, d] = customStart.split('-').map(Number);
+            start = new Date(y, m - 1, d, 0, 0, 0, 0);
+        } else {
+            start = customStart ? new Date(customStart) : new Date(now.getFullYear(), 0, 1);
+            start.setHours(0, 0, 0, 0);
+        }
+        if (customEnd && typeof customEnd === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(customEnd)) {
+            const [y, m, d] = customEnd.split('-').map(Number);
+            end = new Date(y, m - 1, d, 23, 59, 59, 999);
+        } else {
+            end = customEnd ? new Date(customEnd) : new Date(now);
+            end.setHours(23, 59, 59, 999);
+        }
+        label = `${MONTH_NAMES[start.getMonth()]} ${start.getDate()}, ${start.getFullYear()} - ${MONTH_NAMES[end.getMonth()]} ${end.getDate()}, ${end.getFullYear()}`;
+        type = (lower === 'this_month' || lower === 'thismonth') ? 'this_month' : 'custom';
     } else if (lower === 'today') {
         start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
         end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
@@ -53,9 +63,12 @@ export const parseDatePeriod = (dateRangeType = 'this_month', customStart = null
         start.setHours(0, 0, 0, 0);
         label = 'Past 7 Days';
     } else if (lower === 'this_month' || lower === 'thismonth') {
-        start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-        end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-        label = `${MONTH_NAMES[now.getMonth()]} ${now.getFullYear()}`;
+        const year = now.getFullYear();
+        const month = now.getMonth();
+        const lastDay = new Date(year, month + 1, 0).getDate();
+        start = new Date(year, month, 1, 0, 0, 0, 0);
+        end = new Date(year, month, lastDay, 23, 59, 59, 999);
+        label = `${MONTH_NAMES[month]} 1, ${year} - ${MONTH_NAMES[month]} ${lastDay}, ${year}`;
     } else if (lower === 'last_month' || lower === 'lastmonth') {
         start = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0, 0);
         end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
@@ -244,6 +257,100 @@ export const executeHealthcareAnalytics = async (user, plan = {}) => {
     return result;
 };
 
+/**
+ * CareFlow AI — Phase 5 Part C2: Organization Comparison
+ * Compares operational and clinical performance metrics between organizations using actual database metrics.
+ * Super Admin only.
+ */
+export const compareOrganizationsAnalytics = async (user, { orgA, orgB, prompt } = {}) => {
+    if (user?.role !== "super_admin") {
+        return {
+            title: "Organization Comparison",
+            scope: "Access Denied",
+            summary: "Only Super Admin is authorized to compare performance across multiple clinics.",
+            organizations: []
+        };
+    }
+
+    const allOrgs = await OrganizationModel.find().lean();
+    let targetOrgA = null;
+    let targetOrgB = null;
+
+    if (orgA && orgB) {
+        targetOrgA = allOrgs.find(o => String(o._id) === String(orgA) || o.name.toLowerCase().includes(String(orgA).toLowerCase()));
+        targetOrgB = allOrgs.find(o => String(o._id) === String(orgB) || o.name.toLowerCase().includes(String(orgB).toLowerCase()));
+    } else if (prompt) {
+        const compareMatch = prompt.match(/compare\s+([^and|vs]+?)\s+(?:and|vs\.?)\s+(.+?)(?:\s+clinics?|\s+organizations?|\s+this month|\?|$)/i);
+        if (compareMatch) {
+            const name1 = compareMatch[1].trim().toLowerCase();
+            const name2 = compareMatch[2].trim().toLowerCase();
+            targetOrgA = allOrgs.find(o => o.name.toLowerCase().includes(name1) || (o.address?.city && o.address.city.toLowerCase().includes(name1)));
+            targetOrgB = allOrgs.find(o => o.name.toLowerCase().includes(name2) || (o.address?.city && o.address.city.toLowerCase().includes(name2)));
+        }
+    }
+
+    if (!targetOrgA || !targetOrgB) {
+        const activeOrgs = allOrgs.filter(o => ["active", "ACTIVE", "approved", "APPROVED"].includes(o.status));
+        targetOrgA = targetOrgA || activeOrgs[0] || allOrgs[0];
+        targetOrgB = targetOrgB || activeOrgs[1] || allOrgs[1];
+    }
+
+    if (!targetOrgA || !targetOrgB) {
+        return {
+            title: "Organization Comparison",
+            summary: "Insufficient organizations registered on the platform to perform a comparison.",
+            organizations: []
+        };
+    }
+
+    const fetchOrgMetrics = async (org) => {
+        const oId = org._id;
+        const [totalAppts, completedAppts, cancelledAppts, doctorsCount, distinctPatients, payments] = await Promise.all([
+            AppointmentModel.countDocuments({ organizationId: oId }),
+            AppointmentModel.countDocuments({ organizationId: oId, status: { $in: ["completed", "COMPLETED"] } }),
+            AppointmentModel.countDocuments({ organizationId: oId, status: { $in: ["cancelled", "CANCELLED"] } }),
+            DoctorModel.countDocuments({ organizationId: oId }),
+            AppointmentModel.distinct("patientId", { organizationId: oId }),
+            PaymentModel.find({ organizationId: oId, status: { $in: ["paid", "PAID"] } }).lean()
+        ]);
+
+        const completionRate = totalAppts > 0 ? Math.round((completedAppts / totalAppts) * 1000) / 10 : 0;
+        const revenue = payments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+
+        return {
+            organizationId: String(oId),
+            name: org.name,
+            city: org.address?.city || "N/A",
+            status: org.status,
+            appointments: totalAppts,
+            completedAppointments: completedAppts,
+            cancelledAppointments: cancelledAppts,
+            completionRate: `${completionRate}%`,
+            doctors: doctorsCount,
+            patients: Array.isArray(distinctPatients) ? distinctPatients.length : 0,
+            revenue: revenue
+        };
+    };
+
+    const [metricsA, metricsB] = await Promise.all([
+        fetchOrgMetrics(targetOrgA),
+        fetchOrgMetrics(targetOrgB)
+    ]);
+
+    const summary = `Organization Comparison:
+• ${metricsA.name} (${metricsA.city}): ${metricsA.appointments} appointments (${metricsA.completionRate} completion), ${metricsA.patients} patients, ${metricsA.doctors} doctors, ₹${metricsA.revenue.toLocaleString()} revenue.
+• ${metricsB.name} (${metricsB.city}): ${metricsB.appointments} appointments (${metricsB.completionRate} completion), ${metricsB.patients} patients, ${metricsB.doctors} doctors, ₹${metricsB.revenue.toLocaleString()} revenue.`;
+
+    return {
+        title: "Organization Comparison",
+        scope: "Platform-Wide",
+        organizations: [metricsA, metricsB],
+        summary,
+        groundedNarrative: summary,
+        isAnalytics: true
+    };
+};
+
 const handleOrganizationAnalytics = async (user, period, plan, isSuperAdmin, effectiveOrgId, scopeLabel) => {
     if (!isSuperAdmin && !effectiveOrgId) {
         return {
@@ -287,6 +394,10 @@ const handleOrganizationAnalytics = async (user, period, plan, isSuperAdmin, eff
 
     let narrative = '';
     const pLower = (plan.prompt || '').toLowerCase();
+
+    if (pLower.includes('compare') && isSuperAdmin) {
+        return await compareOrganizationsAnalytics(user, { prompt: plan.prompt, orgA: plan.orgA, orgB: plan.orgB });
+    }
 
     if (pLower.includes('how many clinics') || pLower.includes('how many organizations') || pLower.includes('active organizations') || pLower.includes('active clinics')) {
         narrative = `There are currently ${approvedOrgs} active organizations registered on the platform (${totalOrgs} total tenants including ${pendingOrgs} pending review and ${suspendedOrgs} suspended).`;

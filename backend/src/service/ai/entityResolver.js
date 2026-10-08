@@ -297,6 +297,22 @@ export const resolveEntitiesFromToolArgs = async (toolArgs = {}, organizationId 
 
                 const rawQueryText = String(args.prompt || args.query || "").toLowerCase();
                 const toolNameHint = String(args._toolName || toolArgs._toolName || "");
+                // Multi-turn context persistence for doctor: resolve pronouns or previously active patient
+                const activePatientId = resolvedContext?.patientId || resolvedContext?.agentState?.patientId;
+                const activePatientName = resolvedContext?.patientName || resolvedContext?.agentState?.patientName;
+                if (!args.patientId && activePatientId) {
+                    const hasPronoun = /\b(she|he|her|his|their|the\s+patient|this\s+patient)\b/i.test(rawQueryText);
+                    const mentionsNewPatient = /\bpatient\s+([A-Za-z]+)/i.test(rawQueryText) && !rawQueryText.includes(String(activePatientName || "").toLowerCase());
+                    if (hasPronoun || !mentionsNewPatient) {
+                        args.patientId = String(activePatientId);
+                        args.patientName = activePatientName || args.patientName;
+                        const activeApptId = resolvedContext?.appointmentId || resolvedContext?.agentState?.appointmentId;
+                        if (activeApptId) {
+                            args.appointmentId = String(activeApptId);
+                        }
+                    }
+                }
+
                 const appointmentSpecificTools = [
                     "summarizeAppointmentContext",
                     "getAuthorizedPatientHistory",
@@ -315,8 +331,18 @@ export const resolveEntitiesFromToolArgs = async (toolArgs = {}, organizationId 
                     const today = new Date();
                     today.setHours(0, 0, 0, 0);
 
-                    // Attempt to match a patient name if one was mentioned
-                    const patientNameHint = args.patientName || null;
+                    // Attempt to extract patient name if one was mentioned in prompt
+                    let patientNameHint = args.patientName || null;
+                    if (!patientNameHint && rawQueryText) {
+                        const nameMatch = rawQueryText.match(/(?:patient|chart\s+(?:for|of)|records?\s+(?:for|of)|brief\s+(?:for|of)|note\s+(?:for|of)|prescription\s+(?:for|of)|(?:show|results?)\s+(?:for|of)|look\s+up\s+patient|\bfor\b)\s+([A-Za-z.\s]+?)(?:\s+on|\s+at|\s+with|\s+tomorrow|\s+today|'s|\?|$)/i) ||
+                                          rawQueryText.match(/([A-Za-z.\s]+?)'s\s+(?:chart|records|record|history|results|tests|prescriptions|notes|hba1c|vitals)/i);
+                        if (nameMatch && nameMatch[1].trim().length > 1) {
+                            const candidate = nameMatch[1].trim();
+                            if (!/^(the\s+day|today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|appointment|visit|consultation|checkup)$/i.test(candidate)) {
+                                patientNameHint = candidate;
+                            }
+                        }
+                    }
 
                     const apptQuery = {
                         doctorId: DoctorRecord._id,
@@ -330,23 +356,76 @@ export const resolveEntitiesFromToolArgs = async (toolArgs = {}, organizationId 
                         .limit(10)
                         .lean();
 
-                    if (patientNameHint && upcomingAppointments.length > 0) {
+                    if (patientNameHint) {
                         const lowerHint = patientNameHint.toLowerCase();
-                        const nameMatches = upcomingAppointments.filter(a => {
+                        let nameMatches = upcomingAppointments.filter(a => {
                             const pName = (a.patientId?.userId?.name || "").toLowerCase();
                             return pName.includes(lowerHint);
                         });
-                        if (nameMatches.length === 1) {
+
+                        // If not found in upcoming appointments, search across ALL authorized patients for this doctor
+                        if (nameMatches.length === 0) {
+                            const orgId = DoctorRecord.organizationId?._id || DoctorRecord.organizationId;
+                            const allDoctorAppts = await AppointmentModel.find({
+                                doctorId: DoctorRecord._id,
+                                organizationId: orgId
+                            })
+                            .populate({ path: "patientId", populate: { path: "userId", select: "name" } })
+                            .sort({ appointmentDate: -1 })
+                            .limit(25)
+                            .lean();
+
+                            const MedicalRecordModel = (await import("../../model/medicalRecord.js")).default;
+                            const sharedRecords = await MedicalRecordModel.find({
+                                organizationId: orgId,
+                                "sharedWith.doctorId": DoctorRecord._id
+                            })
+                            .populate({ path: "patientId", populate: { path: "userId", select: "name" } })
+                            .lean();
+
+                            const patientMap = new Map();
+                            for (const a of allDoctorAppts) {
+                                if (a.patientId?._id) {
+                                    patientMap.set(String(a.patientId._id), {
+                                        patientId: String(a.patientId._id),
+                                        name: a.patientId.userId?.name || "Patient",
+                                        appointmentId: String(a._id)
+                                    });
+                                }
+                            }
+                            for (const r of sharedRecords) {
+                                if (r.patientId?._id && !patientMap.has(String(r.patientId._id))) {
+                                    patientMap.set(String(r.patientId._id), {
+                                        patientId: String(r.patientId._id),
+                                        name: r.patientId.userId?.name || "Patient",
+                                        appointmentId: null
+                                    });
+                                }
+                            }
+
+                            const allAuthorized = Array.from(patientMap.values());
+                            const broadMatches = allAuthorized.filter(p => p.name.toLowerCase().includes(lowerHint));
+
+                            if (broadMatches.length === 1) {
+                                args.patientId = broadMatches[0].patientId;
+                                args.patientName = broadMatches[0].name;
+                                if (broadMatches[0].appointmentId) args.appointmentId = broadMatches[0].appointmentId;
+                            } else if (broadMatches.length > 1) {
+                                missingRequiredFields.push("patientId");
+                                const choices = broadMatches.map((p, i) => `${i + 1}. ${p.name}`).join("\n");
+                                clarificationQuestion = `I found ${broadMatches.length} patients matching "${patientNameHint}":\n${choices}\nPlease select which patient to view.`;
+                            } else {
+                                missingRequiredFields.push("patientId");
+                                clarificationQuestion = `Patient not found in your authorized clinic records.`;
+                            }
+                        } else if (nameMatches.length === 1) {
                             args.appointmentId = String(nameMatches[0]._id);
                             args.patientId = String(nameMatches[0].patientId?._id || nameMatches[0].patientId);
                             args.patientName = nameMatches[0].patientId?.userId?.name || args.patientName;
-                        } else if (nameMatches.length > 1) {
+                        } else {
                             missingRequiredFields.push("appointmentId");
                             const choices = nameMatches.map((a, i) => `${i + 1}. ${a.patientId?.userId?.name || 'Patient'} (${new Date(a.appointmentDate).toISOString().split('T')[0]} at ${a.startTime})`).join("\n");
                             clarificationQuestion = `I found ${nameMatches.length} appointments matching "${patientNameHint}":\n${choices}\nPlease select one.`;
-                        } else {
-                            missingRequiredFields.push("appointmentId");
-                            clarificationQuestion = `I couldn't find an appointment for a patient named "${patientNameHint}".`;
                         }
                     } else if (!args.appointmentId && !patientNameHint && upcomingAppointments.length > 0) {
                         args.appointmentId = String(upcomingAppointments[0]._id);
@@ -355,7 +434,7 @@ export const resolveEntitiesFromToolArgs = async (toolArgs = {}, organizationId 
                     }
 
                     // If no upcoming appointment found with date >= today, check for any active scheduled/booked appointment
-                    if (!args.appointmentId && !patientNameHint) {
+                    if (!args.appointmentId && !patientNameHint && !args.patientId) {
                         const anyActiveAppts = await AppointmentModel.find({
                             doctorId: DoctorRecord._id,
                             status: { $nin: ["CANCELLED", "cancelled"] }
@@ -372,7 +451,7 @@ export const resolveEntitiesFromToolArgs = async (toolArgs = {}, organizationId 
                         }
                     }
 
-                    if (!args.appointmentId && (toolNameHint === "summarizeAppointmentContext" || requiresAppointment)) {
+                    if (!args.appointmentId && !args.patientId && (toolNameHint === "summarizeAppointmentContext" || toolNameHint === "getPreVisitBrief" || requiresAppointment)) {
                         missingRequiredFields.push("appointmentId");
                         clarificationQuestion = patientNameHint
                             ? `I couldn't find an appointment for "${patientNameHint}" on your calendar.`

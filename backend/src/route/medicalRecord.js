@@ -10,7 +10,12 @@ import {
     revokeMedicalRecordController,
     getMedicalRecordsByAppointmentController,
     updateMedicalRecordController,
-    deleteMedicalRecordController
+    deleteMedicalRecordController,
+    previewMedicalRecordController,
+    downloadMedicalRecordController,
+    summarizeMedicalRecordController,
+    extractMedicalRecordFindingsController,
+    askMedicalRecordQuestionController
 } from "../controller/medicalRecord.js";
 
 const route = Router();
@@ -36,10 +41,42 @@ route.get(
     getMedicalRecordsByAppointmentController
 );
 
+// Preview and Download endpoints with multi-role authorization
+route.get(
+    "/:id/preview",
+    authorization("patient", "doctor", "admin", "super_admin"),
+    previewMedicalRecordController
+);
+
+route.get(
+    "/:id/download",
+    authorization("patient", "doctor", "admin", "super_admin"),
+    downloadMedicalRecordController
+);
+
 route.get(
     "/:id",
-    authorization("patient", "doctor"),
+    authorization("patient", "doctor", "admin", "super_admin"),
     getMedicalRecordByIdController
+);
+
+// Record-Scoped AI Intelligence Endpoints
+route.post(
+    "/:id/ai/summarize",
+    authorization("patient", "doctor", "admin", "super_admin"),
+    summarizeMedicalRecordController
+);
+
+route.post(
+    "/:id/ai/extract",
+    authorization("patient", "doctor", "admin", "super_admin"),
+    extractMedicalRecordFindingsController
+);
+
+route.post(
+    "/:id/ai/ask",
+    authorization("patient", "doctor", "admin", "super_admin"),
+    askMedicalRecordQuestionController
 );
 
 route.patch(

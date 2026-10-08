@@ -1,18 +1,20 @@
 import multer from "multer";
-const storage=multer.memoryStorage()
-const upload=multer({
+import { resolveMedicalFileType } from "../util/fileTypeResolver.js";
+
+const storage = multer.memoryStorage();
+const upload = multer({
     storage,
-    limits:{
-        fileSize:5*1024*1024
+    limits: {
+        fileSize: 10 * 1024 * 1024 // 10MB limit for medical documents and scans
     },
-    fileFilter:(req,file,cb)=>{
-        const allowedTypes=['image/png','image/webp','image/jpeg','image/jpg','application/pdf'];
-        if(allowedTypes.includes(file.mimetype)){
-            cb(null,true);
-        }
-        else{
-            cb(new Error("Only jpeg, png, webp, jpg images and pdf documents are allowed"))
+    fileFilter: (req, file, cb) => {
+        const resolution = resolveMedicalFileType(file);
+        if (resolution.isValid) {
+            cb(null, true);
+        } else {
+            cb(new Error(resolution.error || "Unsupported file type. Only PDF, DOC, DOCX, TXT documents and JPG, PNG, WEBP images are allowed."));
         }
     }
-})
+});
+
 export default upload;

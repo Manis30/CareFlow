@@ -43,6 +43,7 @@ import { formatTime } from '../../utils/formatTime';
 import { showSuccessToast, showErrorToast } from '../../utils/toast';
 import { checkCancellationEligibility } from '../../utils/appointmentCancellationUtils';
 import { handleDownload } from '../../utils/downloadFile';
+import RecordPreviewModal from '../../components/medicalRecord/RecordPreviewModal';
 
 const parseAppointmentEndTime = (dateStr, timeStr) => {
   if (!dateStr || !timeStr) return null;
@@ -104,6 +105,7 @@ const DoctorAppointmentDetails = () => {
   // Cancellation State
   const [cancelModal, setCancelModal] = useState(false);
   const [cancelLoading, setCancelLoading] = useState(false);
+  const [previewModal, setPreviewModal] = useState({ isOpen: false, record: null });
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -628,18 +630,17 @@ const DoctorAppointmentDetails = () => {
 
                         {rec.file?.url && (
                           <div className="flex items-center gap-2 pt-3 border-t border-slate-100">
-                            <a
-                              href={rec.file.url}
-                              target="_blank"
-                              rel="noreferrer"
+                            <button
+                              type="button"
+                              onClick={() => setPreviewModal({ isOpen: true, record: rec })}
                               className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-50 text-slate-800 text-xs font-semibold transition-colors cursor-pointer"
                             >
                               <Eye className="w-3.5 h-3.5" />
                               View
-                            </a>
+                            </button>
                             <button
                               type="button"
-                              onClick={() => handleDownload(rec.file?.url, rec.title)}
+                              onClick={() => handleDownload(rec)}
                               className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-colors shadow-2xs cursor-pointer"
                             >
                               <Download className="w-3.5 h-3.5" />
@@ -756,6 +757,15 @@ const DoctorAppointmentDetails = () => {
         variant="danger"
         loading={cancelLoading}
       />
+
+      {/* Record Preview Modal */}
+      {previewModal.isOpen && (
+        <RecordPreviewModal
+          isOpen={previewModal.isOpen}
+          record={previewModal.record}
+          onClose={() => setPreviewModal({ isOpen: false, record: null })}
+        />
+      )}
     </ContentContainer>
   );
 };

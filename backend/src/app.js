@@ -22,10 +22,13 @@ const app=express()
 console.log("check url", process.env.CLIENT_URL)
 app.use(cors({
     origin: process.env.CLIENT_URL || 'http://localhost:5173',
-    credentials: true
+    credentials: true,
+    exposedHeaders: ['Content-Disposition', 'Content-Type', 'Content-Length']
 }));
 app.use(morgan('dev'))
-app.use(helmet())
+app.use(helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" }
+}))
 app.use(express.json())
 app.use(express.urlencoded({extended:true}))
 app.use(cookieParser())
@@ -44,6 +47,7 @@ app.use('/api/v1/appointment',AppointmentRoute);
 app.use('/api/v1/payment',paymentRoute);
 app.use('/api/v1/super-admin',superAdminRoute);
 app.use('/api/v1/medical-record',medicalRecordRoute);
+app.use('/api/v1/medical-records',medicalRecordRoute);
 app.use('/api/v1/prescription',prescriptionRoute);
 app.use('/api/v1/medication',medicationRoute);
 app.use('/api/v1/chat',chatRoute);

@@ -428,7 +428,8 @@ export const createAppointmentService = async (
 export const getMyAppointmentsService = async (
     userId,
     userRoleOrStatus,
-    statusFilter
+    statusFilter,
+    options = {}
 ) => {
     let role = "patient";
     let status = null;
@@ -439,6 +440,12 @@ export const getMyAppointmentsService = async (
         status = statusFilter;
     } else {
         status = userRoleOrStatus;
+    }
+
+    // Allow options to be passed as statusFilter if statusFilter is an object
+    if (typeof statusFilter === "object" && statusFilter !== null) {
+        options = { ...statusFilter, ...options };
+        status = options.status || null;
     }
 
     const filter = {};
@@ -454,6 +461,45 @@ export const getMyAppointmentsService = async (
         } else {
             filter.status = { $in: [status, sLower, status.toUpperCase()] };
         }
+    }
+
+    // Timeframe filtering (aligns doctor AI & UI date semantics)
+    const tf = options.timeframe || (options.prompt && (/\btoday(?:'?s)? schedule\b/i.test(options.prompt) || /\bschedule today\b/i.test(options.prompt) || /\btoday\b/i.test(options.prompt)) ? "today" : null);
+
+    if (tf === "today") {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        filter.appointmentDate = { $gte: today, $lt: tomorrow };
+        if (!filter.status) {
+            filter.status = { $nin: ["cancelled", "CANCELLED"] };
+        }
+    } else if (tf === "tomorrow") {
+        const tomorrow = new Date();
+        tomorrow.setHours(0, 0, 0, 0);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const dayAfter = new Date(tomorrow);
+        dayAfter.setDate(dayAfter.getDate() + 1);
+        filter.appointmentDate = { $gte: tomorrow, $lt: dayAfter };
+        if (!filter.status) {
+            filter.status = { $nin: ["cancelled", "CANCELLED"] };
+        }
+    } else if (tf === "upcoming") {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        filter.appointmentDate = { $gte: today };
+        if (!filter.status) {
+            filter.status = { $in: ["booked", "in_progress", "BOOKED", "IN_PROGRESS"] };
+        }
+    } else if (tf === "past") {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        filter.appointmentDate = { $lt: today };
+    }
+
+    if (options.consultationType) {
+        filter.consultationType = options.consultationType;
     }
 
     let rawResult = [];

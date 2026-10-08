@@ -6,11 +6,13 @@ import FollowUpTaskModel from "../model/followUpTask.js";
 import PaymentModel from "../model/payment.js";
 import MedicationScheduleModel from "../model/medicationSchedule.js";
 import DoseLogModel from "../model/doseLog.js";
+import DoctorModel from "../model/doctor.js";
 import { getPatientByUserId } from "../repository/patient.js";
 import { AppError } from "../middleware/errorHandler.js";
+import { formatDoctorName } from "../util/formatters.js";
 
 /**
- * Patient Intelligence & Proactive Care Service (Phase 3)
+ * Patient Intelligence & Proactive Care Service (Phase 3 & Phase 4)
  * Assembles chronological patient care timelines and proactive healthcare alerts.
  */
 
@@ -23,6 +25,31 @@ export const getPatientCareTimeline = async (userOrPatientId, targetPatientId = 
             const patient = await getPatientByUserId(userOrPatientId.id || userOrPatientId._id);
             if (!patient) throw new AppError(404, "Patient profile not found");
             patientId = patient._id;
+        } else if (userOrPatientId.role === "doctor") {
+            const doctorUserId = userOrPatientId.id || userOrPatientId._id;
+            const doctor = await DoctorModel.findOne({ userId: doctorUserId }).lean();
+            if (!doctor) throw new AppError(404, "Doctor profile not found");
+            const orgId = doctor.organizationId?._id || doctor.organizationId || userOrPatientId.organizationId;
+
+            if (!targetPatientId) {
+                throw new AppError(400, "patientId is required for doctor timeline lookup");
+            }
+            patientId = targetPatientId;
+
+            const hasAppt = await AppointmentModel.exists({
+                doctorId: doctor._id,
+                patientId,
+                organizationId: orgId
+            });
+            const hasShared = await MedicalRecordModel.exists({
+                patientId,
+                organizationId: orgId,
+                "sharedWith.doctorId": doctor._id
+            });
+
+            if (!hasAppt && !hasShared) {
+                throw new AppError(403, "Doctor is not authorized to access care timeline for this patient");
+            }
         } else if (userOrPatientId.userId && userOrPatientId._id) {
             // Already a patient doc
             patientId = userOrPatientId._id;
@@ -53,7 +80,7 @@ export const getPatientCareTimeline = async (userOrPatientId, targetPatientId = 
 
     // Format Appointments
     for (const appt of appointments) {
-        const docName = appt.doctorId?.userId?.name ? `Dr. ${appt.doctorId.userId.name}` : "Specialist";
+        const docName = formatDoctorName(appt.doctorId?.userId?.name, "Specialist") || "Specialist";
         const orgName = appt.organizationId?.name || "CareFlow Clinic";
         timeline.push({
             date: appt.appointmentDate,
@@ -68,7 +95,7 @@ export const getPatientCareTimeline = async (userOrPatientId, targetPatientId = 
 
     // Format Prescriptions
     for (const presc of prescriptions) {
-        const docName = presc.doctorId?.userId?.name ? `Dr. ${presc.doctorId.userId.name}` : "Doctor";
+        const docName = formatDoctorName(presc.doctorId?.userId?.name, "Doctor") || "Doctor";
         const medNames = (presc.medicines || []).map(m => m.medicineName).join(", ");
         timeline.push({
             date: presc.createdAt,
@@ -131,7 +158,7 @@ export const getProactivePatientCareAlerts = async (userOrPatientId) => {
     .lean();
 
     for (const appt of upcomingAppts) {
-        const docName = appt.doctorId?.userId?.name ? `Dr. ${appt.doctorId.userId.name}` : "Doctor";
+        const docName = formatDoctorName(appt.doctorId?.userId?.name, "Doctor") || "Doctor";
         alerts.push({
             type: "UPCOMING_APPOINTMENT",
             priority: "HIGH",
@@ -195,7 +222,7 @@ export const getProactivePatientCareAlerts = async (userOrPatientId) => {
     .lean();
 
     for (const f of followUps) {
-        const docName = f.doctorId?.userId?.name ? `Dr. ${f.doctorId.userId.name}` : "Doctor";
+        const docName = formatDoctorName(f.doctorId?.userId?.name, "Doctor") || "Doctor";
         alerts.push({
             type: "FOLLOW_UP_DUE",
             priority: "MEDIUM",

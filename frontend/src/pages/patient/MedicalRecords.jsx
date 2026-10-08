@@ -15,9 +15,11 @@ import usePagination from '../../hooks/usePagination';
 import ContentContainer from '../../components/layout/ContentContainer';
 import PageHeader from '../../components/layout/PageHeader';
 import MedicalRecordCard from '../../components/clinical/MedicalRecordCard';
+import RecordPreviewModal from '../../components/medicalRecord/RecordPreviewModal';
 import { CardSkeleton } from '../../components/common/Skeleton';
 import { showSuccessToast, showErrorToast } from '../../utils/toast';
 import { confirmDelete } from '../../utils/confirmDialog';
+import { handleDownload } from '../../utils/downloadFile';
 
 export const PatientMedicalRecords = () => {
   const [records, setRecords] = useState([]);
@@ -28,6 +30,7 @@ export const PatientMedicalRecords = () => {
   // Modals
   const [uploadModal, setUploadModal] = useState(false);
   const [shareModal, setShareModal] = useState({ isOpen: false, record: null });
+  const [previewModal, setPreviewModal] = useState({ isOpen: false, record: null });
 
   useEffect(() => {
     fetchRecords();
@@ -162,13 +165,8 @@ export const PatientMedicalRecords = () => {
               <MedicalRecordCard
                 key={record._id}
                 record={record}
-                onPreview={() => {
-                  if (record.fileUrl || record.file?.url) {
-                    window.open(record.fileUrl || record.file?.url, '_blank', 'noopener,noreferrer');
-                  } else {
-                    showErrorToast('File preview URL not available.');
-                  }
-                }}
+                onPreview={() => setPreviewModal({ isOpen: true, record })}
+                onDownload={() => handleDownload(record)}
                 onShare={() => setShareModal({ isOpen: true, record })}
               />
             ))}
@@ -212,6 +210,14 @@ export const PatientMedicalRecords = () => {
           record={shareModal.record}
           onClose={() => setShareModal({ isOpen: false, record: null })}
           onSuccess={() => fetchRecords()}
+        />
+      )}
+
+      {previewModal.isOpen && (
+        <RecordPreviewModal
+          isOpen={previewModal.isOpen}
+          record={previewModal.record}
+          onClose={() => setPreviewModal({ isOpen: false, record: null })}
         />
       )}
     </ContentContainer>

@@ -104,7 +104,7 @@ const saveAssistantMessage = async (userId, orgId, payload) => {
             toSave.doctorList = payload.agentState.doctors;
         }
         await saveAIChatMessageService(userId, orgId || null, toSave);
-    } catch (_) {}
+    } catch (_) { }
 };
 
 /**
@@ -132,16 +132,40 @@ const synthesizeGroundedResponse = async ({
 
     const isPreVisitBrief = toolTrace.some(t =>
         t.toolName === "summarizeAppointmentContext" ||
-        t.toolName === "getAuthorizedPatientHistory"
+        t.toolName === "getAuthorizedPatientHistory" ||
+        t.toolName === "getPreVisitBrief"
+    );
+
+    const isConsultationSelection = toolTrace.some(t =>
+        t.toolName === "draftClinicalNotes" && t.result?.needsSelection
+    );
+
+    const isDraftRequiringReview = toolTrace.some(t =>
+        (t.toolName === "draftClinicalNotes" && !t.result?.needsSelection) ||
+        t.toolName === "draftPrescription"
+    );
+
+    const isSharedRecordDiscovery = toolTrace.some(t =>
+        t.toolName === "getSharedMedicalRecords"
+    );
+
+    const isPatientDiscovery = toolTrace.some(t =>
+        t.toolName === "getDoctorAuthorizedPatients"
     );
 
     const responseType = isAnalytics
         ? "ANALYTICS"
         : isPreVisitBrief
             ? "PRE_VISIT_BRIEF"
-            : toolTrace.some(t => t.toolName === "searchMyDocuments" || t.toolName === "getMyMedicalRecords")
-                ? "GROUNDED_RECORD"
-                : "LIVE_DATA";
+            : isConsultationSelection
+                ? "CLARIFICATION"
+                : isDraftRequiringReview
+                    ? "DRAFT_REQUIRING_REVIEW"
+                    : (isSharedRecordDiscovery || isPatientDiscovery)
+                        ? "CLARIFICATION"
+                        : toolTrace.some(t => t.toolName === "searchMyDocuments" || t.toolName === "searchPatientDocuments" || t.toolName === "getMyMedicalRecords")
+                            ? "GROUNDED_RECORD"
+                            : "LIVE_DATA";
 
     const evidenceSummary = toolTrace.map((t, idx) => {
         let resStr;
@@ -188,19 +212,40 @@ Synthesize a clear, grounded response addressing the user's inquiry strictly bas
         console.warn("[GroundedSynthesis Warning] LLM generation failed, falling back to deterministic template:", e.message);
     }
 
-    if (synthesizedText) {
+    // 1. Tool failure must NEVER claim success or be fabricated
+    if (lastTool.result && lastTool.result.success === false) {
+        const errorMsg = lastTool.result.message || lastTool.result.error || "The requested CareFlow operation could not be completed.";
+        return buildCanonicalResponse({
+            agentType: specializedAgentType,
+            toolUsed: lastTool.toolName,
+            result: lastTool.result,
+            aiResponse: errorMsg,
+            responseType: RESPONSE_TYPES.ERROR,
+            statusCode: lastTool.result.statusCode || 400,
+            agentState
+        });
+    }
+
+    const sharedTool = toolTrace.find(t => t.toolName === "getSharedMedicalRecords");
+    const patientDiscTool = toolTrace.find(t => t.toolName === "getDoctorAuthorizedPatients");
+    if (sharedTool && (sharedTool.result?.response || sharedTool.result?.message)) {
+        synthesizedText = sharedTool.result.response || sharedTool.result.message;
+    } else if (patientDiscTool && (patientDiscTool.result?.response || patientDiscTool.result?.message)) {
+        synthesizedText = patientDiscTool.result.response || patientDiscTool.result.message;
+    } else if (synthesizedText) {
         const guardrail = checkGroundingGuardrail(synthesizedText, evidenceSummary);
         if (!guardrail.isGrounded) {
             console.warn("[GroundedSynthesis Guardrail] Ungrounded items detected:", guardrail.ungroundedItems);
-            synthesizedText = guardrail.fallbackText || synthesizedText;
+            const pureFallback = templatePureDataResponse(lastTool.toolName, lastTool.result, userRole, lastTool.toolArgs);
+            synthesizedText = (pureFallback && !pureFallback.startsWith("{")) ? pureFallback : (lastTool.result?.message || lastTool.result?.summary || synthesizedText);
         }
     }
 
     if (!synthesizedText || !synthesizedText.trim()) {
         if (toolTrace.length === 1 && PURE_DATA_TOOLS.includes(lastTool.toolName)) {
-            synthesizedText = templatePureDataResponse(lastTool.toolName, lastTool.result);
+            synthesizedText = templatePureDataResponse(lastTool.toolName, lastTool.result, userRole, lastTool.toolArgs);
         } else {
-            synthesizedText = toolTrace.map(t => templatePureDataResponse(t.toolName, t.result)).filter(Boolean).join("\n\n");
+            synthesizedText = toolTrace.map(t => templatePureDataResponse(t.toolName, t.result, userRole, t.toolArgs)).filter(Boolean).join("\n\n");
         }
     }
 
@@ -214,6 +259,13 @@ Synthesize a clear, grounded response addressing the user's inquiry strictly bas
     const disclaimer = resolveDisclaimer(lastTool.toolName);
     const primaryResult = toolTrace.length === 1 ? lastTool.result : { trace: toolTrace.map(t => ({ tool: t.toolName, result: t.result })) };
 
+    const lastResultState = lastTool?.result?.agentState;
+    const mergedAgentState = {
+        ...(lastResultState || {}),
+        ...(agentState || {})
+    };
+    const finalAgentState = Object.keys(mergedAgentState).length > 0 ? mergedAgentState : (agentState || lastResultState || null);
+
     return makePayload({
         agentType: specializedAgentType,
         toolUsed: toolTrace.map(t => t.toolName).join(", "),
@@ -222,7 +274,7 @@ Synthesize a clear, grounded response addressing the user's inquiry strictly bas
         disclaimer,
         citations: citations.length ? [...new Set(citations)] : undefined,
         analyticsPayload: isAnalytics ? (lastTool.result || primaryResult) : undefined,
-        agentState
+        agentState: finalAgentState
     }, responseType);
 };
 
@@ -308,7 +360,7 @@ export const runOrchestratedWorkflow = async (user, requestData = {}) => {
             if (lastDoctorList) {
                 resolvedContext = { lastDoctorList };
             }
-        } catch (_) {}
+        } catch (_) { }
     }
 
     // Emergency screening is deterministic and always happens before LLM/tool work.
@@ -334,7 +386,7 @@ export const runOrchestratedWorkflow = async (user, requestData = {}) => {
                 status: "EMERGENCY_ESCALATION",
                 modelUsed: "DeterministicSafety",
                 latencyMs: Date.now() - startTime
-            }).catch(() => {});
+            }).catch(() => { });
 
             await saveAssistantMessage(userId, orgId, {
                 role: "assistant",
@@ -369,7 +421,7 @@ export const runOrchestratedWorkflow = async (user, requestData = {}) => {
                 status: "SUCCESS",
                 modelUsed: "DeterministicClinicalSafety",
                 latencyMs: Date.now() - startTime
-            }).catch(() => {});
+            }).catch(() => { });
 
             await saveAssistantMessage(userId, orgId, {
                 role: "assistant",
@@ -433,7 +485,7 @@ export const runOrchestratedWorkflow = async (user, requestData = {}) => {
                 confirmed: true,
                 status: "SUCCESS",
                 latencyMs: Date.now() - startTime
-            }).catch(() => {});
+            }).catch(() => { });
 
             await saveAssistantMessage(userId, orgId, {
                 role: "assistant",
@@ -457,7 +509,7 @@ export const runOrchestratedWorkflow = async (user, requestData = {}) => {
                 status: "ERROR",
                 errorMessage: error.message,
                 latencyMs: Date.now() - startTime
-            }).catch(() => {});
+            }).catch(() => { });
 
             return buildCanonicalResponse({
                 responseType: status === 409 ? RESPONSE_TYPES.BOOKING_FAILED : RESPONSE_TYPES.ERROR,
@@ -475,6 +527,115 @@ export const runOrchestratedWorkflow = async (user, requestData = {}) => {
     // If this is a new turn, the previous agent state is still useful. If the previous
     // state was already completed, don't accidentally continue the old goal.
     if (agentState?.stage === "COMPLETED") agentState = null;
+
+    // =========================================================================
+    // SHARED MEDICAL RECORD SELECTION RESOLVER — runs BEFORE booking resolution
+    // When doctor is choosing a shared record: "1", "second one", "all", etc.
+    // =========================================================================
+    if (userRole === "doctor" && (agentState?.stage === "SELECT_SHARED_RECORD" || (agentState?.stage === "RECORD_SELECTED" && /^(all|all of them|review all|check all|\d+|first|second|third|fourth|fifth|record \d+)/i.test(promptMessage.trim())))) {
+        try {
+            const { resolveSharedRecordSelection } = await import("../../doctorCopilot.js");
+            const sharedRes = await resolveSharedRecordSelection(user, {
+                selection: promptMessage,
+                query: promptMessage,
+                agentState
+            });
+            if (sharedRes?.handled) {
+                const finalState = sharedRes.agentState || agentState;
+                const respPayload = makePayload({
+                    agentType,
+                    aiResponse: sharedRes.aiResponse,
+                    toolUsed: "searchPatientDocuments",
+                    result: sharedRes.searchResult,
+                    agentState: finalState,
+                    citations: sharedRes.citations || [],
+                    hasLowConfidenceWarning: sharedRes.hasLowConfidenceWarning || false
+                }, "GROUNDED_RECORD");
+
+                await saveAssistantMessage(userId, orgId, {
+                    role: "assistant",
+                    text: sharedRes.aiResponse,
+                    responseType: "GROUNDED_RECORD",
+                    agentState: finalState,
+                    citations: sharedRes.citations || []
+                });
+                return respPayload;
+            }
+        } catch (selErr) {
+            console.error("[SharedRecordSelection] Error:", selErr.message);
+        }
+    }
+
+    // =========================================================================
+    // DOCTOR CONSULTATION SELECTION RESOLVER — Context Priority 2
+    // When doctor is choosing a consultation for clinical notes: "1", "2", patient name, etc.
+    // =========================================================================
+    if (userRole === "doctor" && agentState?.stage === "SELECT_CONSULTATION") {
+        try {
+            const { resolveDoctorConsultationSelection } = await import("../../doctorCopilot.js");
+            const consultSel = await resolveDoctorConsultationSelection(user, {
+                selection: promptMessage,
+                prompt: promptMessage,
+                agentState
+            });
+            if (consultSel?.handled) {
+                const finalState = consultSel.agentState || agentState;
+                const respPayload = makePayload({
+                    agentType,
+                    aiResponse: consultSel.aiResponse,
+                    toolUsed: "draftClinicalNotes",
+                    result: consultSel.result,
+                    agentState: finalState
+                }, "DRAFT_REQUIRING_REVIEW");
+
+                await saveAssistantMessage(userId, orgId, {
+                    role: "assistant",
+                    text: consultSel.aiResponse,
+                    responseType: "DRAFT_REQUIRING_REVIEW",
+                    agentState: finalState
+                });
+                return respPayload;
+            }
+        } catch (cSelErr) {
+            console.error("[ConsultationSelection] Error:", cSelErr.message);
+        }
+    }
+
+    // =========================================================================
+    // DOCTOR PATIENT SELECTION RESOLVER — Context Priority 3
+    // When doctor is choosing an authorized patient: "Rajasekaran", "1", "second one", etc.
+    // =========================================================================
+    if (userRole === "doctor" && (agentState?.stage === "SELECT_PATIENT" || (Array.isArray(agentState?.authorizedPatients) && agentState.authorizedPatients.length > 0 && !agentState?.patientId))) {
+        try {
+            const { resolveDoctorPatientSelection } = await import("../../doctorCopilot.js");
+            const patientSel = await resolveDoctorPatientSelection(user, {
+                selection: promptMessage,
+                prompt: promptMessage,
+                agentState
+            });
+            if (patientSel?.handled) {
+                const finalState = patientSel.agentState || agentState;
+                const respType = patientSel.isAmbiguous ? "CLARIFICATION" : (patientSel.responseType || "CLARIFICATION");
+                const respPayload = makePayload({
+                    agentType,
+                    aiResponse: patientSel.aiResponse,
+                    toolUsed: patientSel.toolUsed || "lookupDoctorPatient",
+                    result: patientSel.result || patientSel.resolvedPatient || null,
+                    agentState: finalState
+                }, respType);
+
+                await saveAssistantMessage(userId, orgId, {
+                    role: "assistant",
+                    text: patientSel.aiResponse,
+                    responseType: respType,
+                    agentState: finalState
+                });
+                return respPayload;
+            }
+        } catch (patErr) {
+            console.error("[PatientSelection] Error:", patErr.message);
+        }
+    }
 
     // =========================================================================
     // BOOKING STATE RESOLVER — runs BEFORE generic intent routing.
@@ -743,7 +904,9 @@ export const runOrchestratedWorkflow = async (user, requestData = {}) => {
             };
         }
 
-        if (latestPlan?.agentState) agentState = latestPlan.agentState;
+        if (latestPlan && "agentState" in latestPlan) {
+            agentState = latestPlan.agentState !== null ? latestPlan.agentState : (agentState || null);
+        }
 
         // Planner can intentionally pause for user input/confirmation.
         if (latestPlan.action === "RESPOND") {
@@ -825,7 +988,7 @@ export const runOrchestratedWorkflow = async (user, requestData = {}) => {
                 return confirmation;
             }
 
-            if (toolTrace.length > 0 && agentState?.goal !== "BOOK_APPOINTMENT") {
+            if (toolTrace.length > 0 && (agentState?.goal !== "BOOK_APPOINTMENT" || !["SELECT_DOCTOR", "SELECT_DATE", "SELECT_SLOT", "CONFIRM_BOOKING"].includes(agentState?.stage))) {
                 const synthesized = await synthesizeGroundedResponse({
                     rawPrompt,
                     toolTrace,
@@ -841,9 +1004,8 @@ export const runOrchestratedWorkflow = async (user, requestData = {}) => {
                     responseType: synthesized.responseType,
                     citations: synthesized.citations || [],
                     analyticsPayload: synthesized.analyticsPayload,
-                    agentState
+                    agentState: synthesized.agentState || agentState
                 });
-
                 return synthesized;
             }
 
@@ -896,6 +1058,20 @@ export const runOrchestratedWorkflow = async (user, requestData = {}) => {
         }
         executedFingerprints.add(fingerprint);
 
+        // Phase 5: Restrict document search if a shared record was previously selected (Part A10)
+        if (userRole === "doctor" && agentState?.stage === "RECORD_SELECTED" && latestPlan?.toolArgs) {
+            if (latestPlan.toolName === "searchPatientDocuments" || latestPlan.toolName === "searchMyDocuments") {
+                if (agentState.selectedRecordId === "all" && Array.isArray(agentState.sharedMedicalRecords)) {
+                    latestPlan.toolArgs.recordIds = agentState.sharedMedicalRecords.map(r => r.id);
+                } else if (agentState.selectedRecordId && agentState.selectedRecordId !== "all") {
+                    latestPlan.toolArgs.recordId = agentState.selectedRecordId;
+                }
+                if (agentState.patientId) {
+                    latestPlan.toolArgs.patientId = agentState.patientId;
+                }
+            }
+        }
+
         let execution;
         try {
             execution = await executeOrchestratedTool(
@@ -934,7 +1110,7 @@ export const runOrchestratedWorkflow = async (user, requestData = {}) => {
                 errorMessage: error.message,
                 modelUsed: latestPlan.modelUsed,
                 latencyMs: Date.now() - startTime
-            }).catch(() => {});
+            }).catch(() => { });
 
             return buildCanonicalResponse({
                 responseType: RESPONSE_TYPES.ERROR,
@@ -1000,7 +1176,9 @@ export const runOrchestratedWorkflow = async (user, requestData = {}) => {
         });
 
         // Keep the semantic state synchronized with authoritative observations.
-        if (latestPlan.agentState) agentState = latestPlan.agentState;
+        if (latestPlan && "agentState" in latestPlan) {
+            agentState = latestPlan.agentState;
+        }
         if (latestPlan.toolName === "classifySpecialtyFromSymptoms") {
             agentState = {
                 ...(agentState || {}),
@@ -1025,6 +1203,48 @@ export const runOrchestratedWorkflow = async (user, requestData = {}) => {
             };
         }
 
+        if (userRole === "doctor") {
+            const resolvedPatientId = result?.patientId || latestPlan.toolArgs?.patientId;
+            const resolvedPatientName = result?.patientName || latestPlan.toolArgs?.patientName;
+            const resolvedAppointmentId = result?.appointmentId || latestPlan.toolArgs?.appointmentId;
+            if (resolvedPatientId || resolvedPatientName || resolvedAppointmentId) {
+                agentState = {
+                    ...(agentState || {}),
+                    ...(resolvedPatientId ? { patientId: String(resolvedPatientId) } : {}),
+                    ...(resolvedPatientName ? { patientName: String(resolvedPatientName) } : {}),
+                    ...(resolvedAppointmentId ? { appointmentId: String(resolvedAppointmentId) } : {})
+                };
+            }
+
+            if (latestPlan.toolName === "getDoctorAuthorizedPatients" || result?.authorizedPatients || (result?.patients && !agentState?.patientId)) {
+                const pts = result?.authorizedPatients || (Array.isArray(result?.patients) ? result.patients.map((p, idx) => ({
+                    patientId: String(p.patientId || p._id),
+                    name: p.name,
+                    displayName: p.name,
+                    index: idx + 1
+                })) : []);
+                if (pts.length > 0) {
+                    agentState = {
+                        ...(agentState || {}),
+                        stage: "SELECT_PATIENT",
+                        authorizedPatients: pts
+                    };
+                }
+            }
+
+            if (latestPlan.toolName === "getSharedMedicalRecords" || result?.sharedMedicalRecords || result?.records) {
+                const recs = result?.records || result?.sharedMedicalRecords || result?.agentState?.sharedMedicalRecords;
+                if (Array.isArray(recs) && recs.length > 0) {
+                    agentState = {
+                        ...(agentState || {}),
+                        stage: "SELECT_SHARED_RECORD",
+                        sharedMedicalRecords: recs,
+                        patientId: result?.patientId || agentState?.patientId
+                    };
+                }
+            }
+        }
+
         await AIAuditLogModel.create({
             userId,
             organizationId: orgId,
@@ -1039,7 +1259,7 @@ export const runOrchestratedWorkflow = async (user, requestData = {}) => {
             modelUsed: latestPlan.modelUsed || "CareFlow-Agent",
             confidence: latestPlan.confidence,
             latencyMs: Date.now() - startTime
-        }).catch(() => {});
+        }).catch(() => { });
 
         // Both booking and non-booking agent workflows continue observing tool results.
         // The planner will decide on the next step whether more tools are required or to RESPOND.
@@ -1047,7 +1267,7 @@ export const runOrchestratedWorkflow = async (user, requestData = {}) => {
         continue;
     }
 
-    if (toolTrace.length > 0 && agentState?.goal !== "BOOK_APPOINTMENT") {
+    if (toolTrace.length > 0 && (agentState?.goal !== "BOOK_APPOINTMENT" || !["SELECT_DOCTOR", "SELECT_DATE", "SELECT_SLOT", "CONFIRM_BOOKING"].includes(agentState?.stage))) {
         const synthesized = await synthesizeGroundedResponse({
             rawPrompt,
             toolTrace,
@@ -1063,7 +1283,7 @@ export const runOrchestratedWorkflow = async (user, requestData = {}) => {
             responseType: synthesized.responseType,
             citations: synthesized.citations || [],
             analyticsPayload: synthesized.analyticsPayload,
-            agentState
+            agentState: synthesized.agentState || agentState
         });
 
         return synthesized;

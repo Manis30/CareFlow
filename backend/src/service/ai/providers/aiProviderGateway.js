@@ -27,6 +27,18 @@ class AIProviderGateway {
         };
     }
 
+    markProviderUnavailable(providerName = "gemini", durationMs = 60000) {
+        if (providerName === "gemini" && typeof this.primary.markUnavailable === "function") {
+            this.primary.markUnavailable(durationMs);
+        }
+    }
+
+    resetCooldown(providerName = "gemini") {
+        if (providerName === "gemini" && typeof this.primary.resetCooldown === "function") {
+            this.primary.resetCooldown();
+        }
+    }
+
     async generate({ systemInstruction, prompt, responseSchema, timeoutMs = 10000 }) {
         this.metrics.totalCalls++;
         const callStartTime = Date.now();
@@ -46,10 +58,17 @@ class AIProviderGateway {
                 return res;
             } catch (err) {
                 geminiError = err;
-                console.warn("[AIProviderGateway] Primary provider (Gemini) failed. Engaging Groq fallback:", err.message);
+                const isQuota = err.isQuotaExhausted || err.status === 429 || err.message?.includes("RESOURCE_EXHAUSTED") || err.message?.includes("Quota exceeded") || err.message?.includes("429");
+                if (isQuota) {
+                    this.markProviderUnavailable("gemini", 60000);
+                    console.warn("[AIProviderGateway] Primary provider (Gemini) quota exhausted. Marked Gemini unavailable (cooldown active). Fast-failing to Groq fallback.");
+                } else {
+                    console.warn("[AIProviderGateway] Primary provider (Gemini) failed. Engaging Groq fallback:", err.message);
+                }
             }
         } else {
-            geminiError = new Error("Gemini provider not available");
+            geminiError = new Error("Gemini provider is temporarily unavailable (cooldown active)");
+            console.log("[AIProviderGateway] Gemini currently unavailable/on cooldown. Routing directly to Groq fallback.");
         }
 
         // 2. Try Fallback Provider (Groq) (Rule 19)

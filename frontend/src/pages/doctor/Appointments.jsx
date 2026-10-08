@@ -139,12 +139,16 @@ export const DoctorAppointments = () => {
     resetPage();
   }, [activeTab, searchQuery, channelFilter]);
 
-  // Statistics for the current tab
+  // Statistics for the current tab and filter
+  const totalCount = filteredAppointments.length;
   const videoCount = useMemo(
-    () => appointments.filter((a) => a.consultationType === 'online').length,
-    [appointments]
+    () => filteredAppointments.filter((a) => a.consultationType === 'online').length,
+    [filteredAppointments]
   );
-  const inPersonCount = appointments.length - videoCount;
+  const inClinicCount = useMemo(
+    () => filteredAppointments.filter((a) => a.consultationType === 'offline').length,
+    [filteredAppointments]
+  );
 
   return (
     <ContentContainer className="space-y-6 pb-12">
@@ -242,7 +246,7 @@ export const DoctorAppointments = () => {
           {/* Quick Metrics Badges */}
           <div className="flex items-center gap-2.5 text-xs">
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-50 border border-slate-200 text-slate-700 font-semibold">
-              <span className="text-slate-400 font-normal">Total:</span> {appointments.length}
+              <span className="text-slate-400 font-normal">Total:</span> {totalCount}
             </span>
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-blue-50 border border-blue-100 text-blue-700 font-semibold">
               <Video className="w-3.5 h-3.5 text-blue-600" />
@@ -250,7 +254,7 @@ export const DoctorAppointments = () => {
             </span>
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-50 border border-slate-200 text-slate-700 font-semibold">
               <MapPin className="w-3.5 h-3.5 text-slate-500" />
-              <span className="text-slate-400 font-normal">In-Clinic:</span> {inPersonCount}
+              <span className="text-slate-400 font-normal">In-Clinic:</span> {inClinicCount}
             </span>
           </div>
         </div>
@@ -279,7 +283,7 @@ export const DoctorAppointments = () => {
             >
               <option value="all">All Channels</option>
               <option value="online">Online Video Only</option>
-              <option value="in_person">In-Clinic Only</option>
+              <option value="offline">In-Clinic Only</option>
             </select>
           </div>
         </div>
@@ -352,7 +356,11 @@ export const DoctorAppointments = () => {
         <EmptyState
           icon={CalendarDays}
           title={
-            searchQuery
+            channelFilter === 'online'
+              ? 'No online consultations found.'
+              : channelFilter === 'offline'
+              ? 'No in-clinic consultations found.'
+              : searchQuery
               ? 'No appointments matched your query'
               : activeTab === 'today'
               ? 'Your schedule is clear today'

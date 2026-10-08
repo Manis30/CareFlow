@@ -46,12 +46,26 @@ export const TOOL_NAME_ALIASES = Object.freeze({
     "GET_MY_DEPARTMENT": "getMyDoctorProfile",
     "GET_APPOINTMENTS": "getMyAppointments",
     "getMyAppointments": "getMyAppointments",
+    "get_appointments": "getMyAppointments",
+    "getAppointments": "getMyAppointments",
+    "today_schedule": "getMyAppointments",
+    "todaySchedule": "getMyAppointments",
+    "get_today_schedule": "getMyAppointments",
+    "getTodaySchedule": "getMyAppointments",
     "GET_PRESCRIPTIONS": "getMyPrescriptions",
     "getMyPrescriptions": "getMyPrescriptions",
+    "get_prescriptions": "getMyPrescriptions",
+    "getPrescriptions": "getMyPrescriptions",
+    "get_active_prescriptions": "getMyPrescriptions",
+    "getActivePrescriptions": "getMyPrescriptions",
     "GET_MY_PAYMENTS": "getMyPayments",
     "getMyPayments": "getMyPayments",
     "EXPLAIN_PRESCRIPTIONS": "explainMyPrescriptions",
     "explainMyPrescriptions": "explainMyPrescriptions",
+    "explain_prescriptions": "explainMyPrescriptions",
+    "explain_active_prescriptions": "explainMyPrescriptions",
+    "explainActivePrescriptions": "explainMyPrescriptions",
+    "active_prescriptions": "explainMyPrescriptions",
     "GET_MEDICAL_RECORDS": "getMyMedicalRecords",
     "getMyMedicalRecords": "getMyMedicalRecords",
     "SEARCH_DOCUMENTS": "searchMyDocuments",
@@ -61,6 +75,8 @@ export const TOOL_NAME_ALIASES = Object.freeze({
     "searchDoctors": "searchDoctors",
     "GET_DOCTORS": "getDoctors",
     "getDoctors": "getDoctors",
+    "find_care": "getDoctors",
+    "findCare": "getDoctors",
     "GET_ORGANIZATION_ROSTER": "getOrganizationRoster",
     "getOrganizationRoster": "getOrganizationRoster",
     "GET_SYSTEM_HEALTH_TRENDS": "getSystemHealthTrends",
@@ -84,7 +100,28 @@ export const TOOL_NAME_ALIASES = Object.freeze({
     "CHECK_PRESCRIPTION_SAFETY": "checkPrescriptionSafety",
     "checkPrescriptionSafety": "checkPrescriptionSafety",
     "doctorApproveMedicationSchedule": "doctorApproveMedicationSchedule",
-    "DOCTOR_APPROVE_MEDICATION_SCHEDULE": "doctorApproveMedicationSchedule"
+    "DOCTOR_APPROVE_MEDICATION_SCHEDULE": "doctorApproveMedicationSchedule",
+    "getPreVisitBrief": "getPreVisitBrief",
+    "GET_PRE_VISIT_BRIEF": "getPreVisitBrief",
+    "PRE_VISIT_BRIEF": "getPreVisitBrief",
+    "getClinicalSummary": "getClinicalSummary",
+    "GET_CLINICAL_SUMMARY": "getClinicalSummary",
+    "CLINICAL_SUMMARY": "getClinicalSummary",
+    "searchPatientDocuments": "searchPatientDocuments",
+    "SEARCH_PATIENT_DOCUMENTS": "searchPatientDocuments",
+    "getDoctorAuthorizedPatients": "getDoctorAuthorizedPatients",
+    "GET_DOCTOR_AUTHORIZED_PATIENTS": "getDoctorAuthorizedPatients",
+    "lookupDoctorPatient": "lookupDoctorPatient",
+    "LOOKUP_DOCTOR_PATIENT": "lookupDoctorPatient",
+    "getSharedMedicalRecords": "getSharedMedicalRecords",
+    "GET_SHARED_MEDICAL_RECORDS": "getSharedMedicalRecords",
+    "sharedMedicalRecords": "getSharedMedicalRecords",
+    "selectSharedMedicalRecord": "selectSharedMedicalRecord",
+    "SELECT_SHARED_RECORD": "selectSharedMedicalRecord",
+    "SELECT_SHARED_MEDICAL_RECORD": "selectSharedMedicalRecord",
+    "compareOrganizations": "compareOrganizations",
+    "COMPARE_ORGANIZATIONS": "compareOrganizations",
+    "compareOrganizationsAnalytics": "compareOrganizations"
 });
 
 /**
@@ -95,7 +132,7 @@ export const computeToolFingerprint = (toolName, toolArgs = {}) => {
     const cleanArgs = {};
     for (const [k, v] of Object.entries(toolArgs || {})) {
         if (k !== "prompt" && v !== undefined && v !== null) {
-            cleanArgs[k] = String(v);
+            cleanArgs[k] = typeof v === "object" ? JSON.stringify(v) : String(v);
         }
     }
     const sortedKeyPairs = Object.keys(cleanArgs).sort().map(k => `${k}:${cleanArgs[k]}`).join("|");

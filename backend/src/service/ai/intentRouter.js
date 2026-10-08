@@ -2,6 +2,7 @@ import * as chrono from "chrono-node";
 import { generateStructuredContent, getGeminiModelName } from "./geminiClient.js";
 import { resolveEntitiesFromToolArgs, parseOrdinalIndex } from "./entityResolver.js";
 import { parseNaturalTimeExpression } from "../../util/appointmentTimeUtils.js";
+import { TOOL_NAME_ALIASES } from "./orchestrator/toolExecutor.js";
 
 /**
  * Structured Intent Router for CareFlow AI Gateway.
@@ -38,6 +39,7 @@ Tool definitions:
 - "getOrganizationRoster": Get list of clinics/organizations and their assigned doctors. Args: {}
 - "getDoctorLeave": Check a doctor's leave/time-off periods. Args: { doctorId, date }
 - "getMyDoctorProfile": Retrieve the authenticated doctor's assigned department, specialty, qualifications, and profile information (e.g. "what department am I in?", "which department do I belong to?", "what is my specialty?"). Doctor only. Args: {}
+- "getDoctorAuthorizedPatients": Retrieve list of authorized patients for the authenticated doctor (e.g. "what can you tell me about patient records", "show patient records", "show my patients", "patient information", "patient history", "patient records"). Doctor only. Args: {}
 
 CRITICAL MULTI-TOOL & AGENT COMPLETION RULES:
 1. If Previous Tool Observations already provide the information needed to answer the user's request completely, return "completionState": "COMPLETE", "toolName": null.
@@ -46,7 +48,7 @@ CRITICAL MULTI-TOOL & AGENT COMPLETION RULES:
 
 Return JSON matching this exact structure:
 {
-  "intent": "BOOK_APPOINTMENT" | "CANCEL_APPOINTMENT" | "RESCHEDULE_APPOINTMENT" | "CLASSIFY_SYMPTOMS" | "SEARCH_DOCTOR" | "GET_DOCTOR_AVAILABILITY" | "GET_APPOINTMENTS" | "GET_PATIENT_HISTORY" | "SUMMARIZE_APPOINTMENT" | "DRAFT_CLINICAL_NOTES" | "DRAFT_PRESCRIPTION" | "SEARCH_DOCUMENTS" | "GET_PLATFORM_STATS" | "GET_CLINIC_STATS" | "GET_HEALTHCARE_ANALYTICS" | "GET_PAYMENT_STATS" | "GET_SYSTEM_HEALTH_TRENDS" | "GET_PRESCRIPTIONS" | "EXPLAIN_PRESCRIPTIONS" | "GET_MEDICAL_RECORDS" | "CHECK_IN_PATIENT" | "GET_ORGANIZATION_ROSTER" | "GET_DOCTOR_PROFILE" | "UNKNOWN",
+  "intent": "BOOK_APPOINTMENT" | "CANCEL_APPOINTMENT" | "RESCHEDULE_APPOINTMENT" | "CLASSIFY_SYMPTOMS" | "SEARCH_DOCTOR" | "GET_DOCTOR_AVAILABILITY" | "GET_APPOINTMENTS" | "GET_PATIENT_HISTORY" | "SUMMARIZE_APPOINTMENT" | "DRAFT_CLINICAL_NOTES" | "DRAFT_PRESCRIPTION" | "SEARCH_DOCUMENTS" | "GET_PLATFORM_STATS" | "GET_CLINIC_STATS" | "GET_HEALTHCARE_ANALYTICS" | "GET_PAYMENT_STATS" | "GET_SYSTEM_HEALTH_TRENDS" | "GET_PRESCRIPTIONS" | "EXPLAIN_PRESCRIPTIONS" | "GET_MEDICAL_RECORDS" | "CHECK_IN_PATIENT" | "GET_ORGANIZATION_ROSTER" | "GET_DOCTOR_PROFILE" | "GET_DOCTOR_AUTHORIZED_PATIENTS" | "UNKNOWN",
   "toolName": string or null,
   "toolArgs": object,
   "missingRequiredFields": array of strings,
@@ -58,7 +60,7 @@ Return JSON matching this exact structure:
 /**
  * Parses natural language dates and time ranges from user prompt / toolArgs using chrono-node and date expressions.
  */
-export const postProcessDates = (text, toolArgs = {}, agentState = null) => {
+export const postProcessDates = (text, toolArgs = {}, agentState = null, referenceDate = new Date()) => {
     const args = { ...toolArgs };
     const pLower = text.toLowerCase();
 
@@ -134,11 +136,13 @@ export const postProcessDates = (text, toolArgs = {}, agentState = null) => {
         args.endDate = end.toISOString().split('T')[0];
         args.timeframe = "last_month";
     } else if (pLower.includes("this month")) {
-        const now = new Date();
-        const start = new Date(now.getFullYear(), now.getMonth(), 1);
-        const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-        args.startDate = start.toISOString().split('T')[0];
-        args.endDate = end.toISOString().split('T')[0];
+        const now = referenceDate ? new Date(referenceDate) : new Date();
+        const year = now.getFullYear();
+        const month = now.getMonth();
+        const lastDay = new Date(year, month + 1, 0).getDate();
+        const mStr = String(month + 1).padStart(2, '0');
+        args.startDate = `${year}-${mStr}-01`;
+        args.endDate = `${year}-${mStr}-${String(lastDay).padStart(2, '0')}`;
         args.timeframe = "this_month";
     } else if (pLower.includes("yesterday")) {
         const now = new Date();
@@ -259,14 +263,22 @@ const ALLOWED_TOOLS = new Set([
     "logDose",
     "proposeMedicationSchedule",
     "checkPrescriptionSafety",
-    "doctorApproveMedicationSchedule"
+    "doctorApproveMedicationSchedule",
+    "getPreVisitBrief",
+    "getClinicalSummary",
+    "searchPatientDocuments",
+    "getDoctorAuthorizedPatients",
+    "lookupDoctorPatient",
+    "getSharedMedicalRecords",
+    "selectSharedMedicalRecord",
+    "compareOrganizations"
 ]);
 
 const ROLE_ALLOWED_TOOLS = {
     patient: new Set([
         "createAppointmentHold", "cancelAppointment", "rescheduleAppointment",
         "classifySpecialtyFromSymptoms", "getDoctors", "searchDoctors", "getDoctorAvailability",
-        "getMyAppointments", "searchMyDocuments", "getMyPrescriptions", "getMyPayments",
+        "getMyAppointments", "searchMyDocuments", "searchPatientDocuments", "getMyPrescriptions", "getMyPayments",
         "explainMyPrescriptions", "getMyMedicalRecords", "getPatientCareTimeline",
         "getTodayMedications", "getMedicationAdherence", "getProactivePatientCare",
         "getFollowUpCare", "logDose", "proposeMedicationSchedule"
@@ -274,30 +286,35 @@ const ROLE_ALLOWED_TOOLS = {
     doctor: new Set([
         "getMyAppointments", "getDoctorAvailability", "getDoctorLeave",
         "getAuthorizedPatientHistory", "summarizeAppointmentContext",
+        "getPreVisitBrief", "getClinicalSummary",
         "draftClinicalNotes", "draftPrescription", "getClinicStats",
-        "getDoctors", "searchDoctors", "getMyDoctorProfile", "searchMyDocuments",
+        "getDoctors", "searchDoctors", "getMyDoctorProfile", "searchMyDocuments", "searchPatientDocuments",
         "getMyMedicalRecords", "getMyPrescriptions", "explainMyPrescriptions",
         "getPatientCareTimeline", "getTodayMedications", "getMedicationAdherence",
         "getFollowUpCare", "logDose", "proposeMedicationSchedule", "checkPrescriptionSafety",
-        "doctorApproveMedicationSchedule"
+        "doctorApproveMedicationSchedule", "getDoctorAuthorizedPatients", "lookupDoctorPatient",
+        "getSharedMedicalRecords", "selectSharedMedicalRecord"
     ]),
     admin: new Set([
         "getMyAppointments", "getDoctorAvailability", "getDoctorLeave",
         "getClinicStats", "getHealthcareAnalytics", "getPaymentStats",
         "getDoctors", "searchDoctors", "getOrganizationRoster", "checkInPatient",
         "cancelAppointment", "rescheduleAppointment", "getMyDoctorProfile",
-        "checkPrescriptionSafety", "doctorApproveMedicationSchedule"
+        "checkPrescriptionSafety", "doctorApproveMedicationSchedule",
+        "getSharedMedicalRecords", "selectSharedMedicalRecord"
     ]),
     organization_admin: new Set([
         "getMyAppointments", "getDoctorAvailability", "getDoctorLeave",
         "getClinicStats", "getHealthcareAnalytics", "getPaymentStats",
         "getDoctors", "searchDoctors", "getOrganizationRoster", "checkInPatient",
         "cancelAppointment", "rescheduleAppointment", "getMyDoctorProfile",
-        "checkPrescriptionSafety", "doctorApproveMedicationSchedule"
+        "checkPrescriptionSafety", "doctorApproveMedicationSchedule",
+        "getSharedMedicalRecords", "selectSharedMedicalRecord"
     ]),
     super_admin: new Set([
         ...ALLOWED_TOOLS,
-        "getPlatformStats", "getSystemHealthTrends", "getMyDoctorProfile"
+        "getPlatformStats", "getSystemHealthTrends", "getMyDoctorProfile",
+        "compareOrganizations", "getSharedMedicalRecords", "selectSharedMedicalRecord"
     ])
 };
 
@@ -311,8 +328,8 @@ const TOOL_REQUIRED_FIELDS = {
     getDoctorAvailability: [],
     getAuthorizedPatientHistory: ["appointmentId"],
     summarizeAppointmentContext: ["appointmentId"],
-    draftClinicalNotes: ["appointmentId"],
-    draftPrescription: ["appointmentId", "diagnosis"],
+    draftClinicalNotes: [],
+    draftPrescription: ["diagnosis"],
     searchMyDocuments: ["query"],
     getHealthcareAnalytics: [],
     getPaymentStats: [],
@@ -320,7 +337,12 @@ const TOOL_REQUIRED_FIELDS = {
     explainMyPrescriptions: ["query"],
     checkInPatient: ["appointmentId"],
     getDoctorLeave: [],
-    getMyDoctorProfile: []
+    getMyDoctorProfile: [],
+    getDoctorAuthorizedPatients: [],
+    lookupDoctorPatient: ["patientName"],
+    getSharedMedicalRecords: [],
+    selectSharedMedicalRecord: [],
+    compareOrganizations: []
 };
 
 const INTENT_TO_TOOL = {
@@ -352,9 +374,16 @@ const INTENT_TO_TOOL = {
     GET_PAYMENT_STATS: "getPaymentStats",
     GET_SYSTEM_HEALTH_TRENDS: "getSystemHealthTrends",
     GET_PRESCRIPTIONS: "getMyPrescriptions",
+    GET_ACTIVE_PRESCRIPTIONS: "getMyPrescriptions",
+    ACTIVE_PRESCRIPTIONS: "getMyPrescriptions",
     GET_MY_PAYMENTS: "getMyPayments",
     MY_PAYMENTS: "getMyPayments",
     EXPLAIN_PRESCRIPTIONS: "explainMyPrescriptions",
+    EXPLAIN_ACTIVE_PRESCRIPTIONS: "explainMyPrescriptions",
+    TODAY_SCHEDULE: "getMyAppointments",
+    GET_SCHEDULE: "getMyAppointments",
+    GET_TODAY_SCHEDULE: "getMyAppointments",
+    FIND_CARE: "getDoctors",
     GET_MEDICAL_RECORDS: "getMyMedicalRecords",
     CHECK_IN_PATIENT: "checkInPatient",
     GET_ORGANIZATION_ROSTER: "getOrganizationRoster",
@@ -379,7 +408,20 @@ const INTENT_TO_TOOL = {
     PROPOSE_MEDICATION_SCHEDULE: "proposeMedicationSchedule",
     CHECK_PRESCRIPTION_SAFETY: "checkPrescriptionSafety",
     DOCTOR_APPROVE_MEDICATION_SCHEDULE: "doctorApproveMedicationSchedule",
-    APPROVE_MEDICATION_SCHEDULE: "doctorApproveMedicationSchedule"
+    APPROVE_MEDICATION_SCHEDULE: "doctorApproveMedicationSchedule",
+    GET_PRE_VISIT_BRIEF: "getPreVisitBrief",
+    PRE_VISIT_BRIEF: "getPreVisitBrief",
+    GET_CLINICAL_SUMMARY: "getClinicalSummary",
+    CLINICAL_SUMMARY: "getClinicalSummary",
+    SEARCH_PATIENT_DOCUMENTS: "searchPatientDocuments",
+    GET_DOCTOR_AUTHORIZED_PATIENTS: "getDoctorAuthorizedPatients",
+    LOOKUP_DOCTOR_PATIENT: "lookupDoctorPatient",
+    PATIENT_LOOKUP: "lookupDoctorPatient",
+    GET_SHARED_MEDICAL_RECORDS: "getSharedMedicalRecords",
+    SHARED_MEDICAL_RECORDS: "getSharedMedicalRecords",
+    SELECT_SHARED_RECORD: "selectSharedMedicalRecord",
+    SELECT_SHARED_MEDICAL_RECORD: "selectSharedMedicalRecord",
+    COMPARE_ORGANIZATIONS: "compareOrganizations"
 };
 
 /**
@@ -401,6 +443,231 @@ export const extractIntent = async (
     agentState = null
 ) => {
     const role = user?.role || "patient";
+    const pLower = String(promptMessage || "").toLowerCase().trim();
+
+    // ─────────────────────────────────────────────────────────────────
+    // DETERMINISTIC CLINICAL & ROLE PRE-ROUTING (Context Priority 1-4)
+    // Evaluated before LLM generation to guarantee zero latency and prevent
+    // timeouts/cooldown failures on deterministic discovery requests.
+    // ─────────────────────────────────────────────────────────────────
+    if (role === "doctor") {
+        // 1. Doctor Patient Discovery (Phase 7):
+        // Generic discovery queries when NO active patient context exists
+        const isPatientRecordsDiscovery = (
+            /^(?:what\s+can\s+you\s+tell\s+me\s+about\s+)?patient\s+(?:records?|information|history)\??$/i.test(pLower) ||
+            /^(?:show|list|view|my)\s+(?:patient\s+records?|patients?|patient\s+information|patient\s+history)\??$/i.test(pLower) ||
+            /\b(?:patient\s+records?|show\s+my\s+patients|my\s+patients|patient\s+information|patient\s+history)\b/i.test(pLower)
+        );
+
+        if (isPatientRecordsDiscovery && !agentState?.patientId) {
+            return {
+                intent: "GET_DOCTOR_AUTHORIZED_PATIENTS",
+                toolName: "getDoctorAuthorizedPatients",
+                toolArgs: {},
+                missingRequiredFields: [],
+                requiredCapabilities: [],
+                confidence: 0.98,
+                modelUsed: "deterministic_rules"
+            };
+        }
+
+        // 2. Doctor Shared Medical Records Query:
+        // When active patient context exists, phrases asking for shared records route directly to getSharedMedicalRecords
+        const isBroadSharedRecord = (
+            /\b(show|list|view|what|tell\s+me|find|get)\b/i.test(pLower) &&
+            /\b(shared\s+(?:medical\s+)?records?|shared\s+reports?|shared\s+documents?)\b/i.test(pLower)
+        ) || /^(show\s+(?:all\s+)?shared\s+records|show\s+shared\s+medical\s+records|what\s+shared\s+medical\s+records\s+does\s+(?:this\s+patient|he|she|they|[a-z]+)\s+have|tell\s+me\s+something\s+about\s+(?:the|his|her|their)?\s*shared\s+medical\s+records|show\s+me\s+the\s+shared\s+medical\s+records|show\s+me\s+(?:this\s+patient'?s?|his|her|their)\s+shared\s+medical\s+records)\??$/i.test(pLower);
+
+        const isSpecificSearchQuery = /\b(what does (?:it|the record|the report) say about|does the patient have|search for|hba1c|blood pressure|vitals|creatinine)\b/i.test(pLower);
+
+        if ((isBroadSharedRecord || (isPatientRecordsDiscovery && agentState?.patientId)) && !isSpecificSearchQuery) {
+            return {
+                intent: "GET_SHARED_MEDICAL_RECORDS",
+                toolName: "getSharedMedicalRecords",
+                toolArgs: agentState?.patientId ? { patientId: agentState.patientId } : {},
+                missingRequiredFields: [],
+                requiredCapabilities: [],
+                confidence: 0.98,
+                modelUsed: "deterministic_rules"
+            };
+        }
+
+        // 3. Doctor Department / Profile Query (Rule 6.10):
+        if (
+            pLower.includes("what department am i in") ||
+            pLower.includes("which department do i belong") ||
+            pLower.includes("what is my department") ||
+            pLower.includes("what's my department") ||
+            pLower.includes("what is my specialty") ||
+            pLower.includes("what's my specialty") ||
+            (pLower.includes("my specialty") && pLower.includes("what"))
+        ) {
+            return {
+                intent: "GET_DOCTOR_PROFILE",
+                toolName: "getMyDoctorProfile",
+                toolArgs: {},
+                missingRequiredFields: [],
+                requiredCapabilities: [],
+                confidence: 0.95,
+                modelUsed: "deterministic_rules"
+            };
+        }
+
+        // 4. Doctor Schedule / Today's Appointments:
+        if (
+            /\b(?:today(?:'?s)? schedule|schedule today|my schedule|today'?s appointments|operating schedule|who am i seeing today)\b/i.test(pLower) ||
+            /^(?:what\s+can\s+you\s+tell\s+me\s+about\s+)?today(?:'?s)?\s+schedule\??$/i.test(pLower) ||
+            /^(?:what\s+is\s+my\s+schedule\s+today|check\s+operating\s+schedule\s+for\s+today|who\s+am\s+i\s+seeing\s+today)\??$/i.test(pLower) ||
+            (/\b(?:schedule|appointments?|seeing)\b/i.test(pLower) && /\btoday\b/i.test(pLower))
+        ) {
+            return {
+                intent: "GET_APPOINTMENTS",
+                toolName: "getMyAppointments",
+                toolArgs: { timeframe: "today", prompt: promptMessage },
+                missingRequiredFields: [],
+                requiredCapabilities: [],
+                confidence: 0.98,
+                modelUsed: "deterministic_rules"
+            };
+        }
+
+        // 5. Doctor Clinical Notes / SOAP Notes:
+        if (
+            /\b(?:draft\s+(?:clinical|soap)\s+notes?|clinical\s+notes?|soap\s+notes?)\b/i.test(pLower) ||
+            /^(?:draft\s+(?:clinical|soap)\s+notes?(?:\s+for\s+(?:this\s+)?consultation)?)\??$/i.test(pLower)
+        ) {
+            return {
+                intent: "DRAFT_CLINICAL_NOTES",
+                toolName: "draftClinicalNotes",
+                toolArgs: {
+                    appointmentId: agentState?.appointmentId || null,
+                    patientId: agentState?.patientId || null,
+                    prompt: promptMessage
+                },
+                missingRequiredFields: [],
+                requiredCapabilities: [],
+                confidence: 0.98,
+                modelUsed: "deterministic_rules"
+            };
+        }
+    }
+
+    if (role === "patient") {
+        // Patient Active Prescriptions:
+        if (
+            (/\b(?:explain|tell me about|understand)\b/i.test(pLower) && /\b(?:prescriptions?|medications?|medicines?)\b/i.test(pLower)) ||
+            /^(?:explain\s+(?:my\s+)?(?:active\s+)?prescriptions?)\??$/i.test(pLower)
+        ) {
+            return {
+                intent: "EXPLAIN_PRESCRIPTIONS",
+                toolName: "explainMyPrescriptions",
+                toolArgs: { query: promptMessage, prompt: promptMessage },
+                missingRequiredFields: [],
+                requiredCapabilities: [],
+                confidence: 0.98,
+                modelUsed: "deterministic_rules"
+            };
+        }
+
+        if (
+            /\b(?:my active prescriptions|active prescriptions)\b/i.test(pLower) ||
+            /^(?:show\s+(?:my\s+)?prescriptions|my\s+prescriptions|what\s+are\s+my\s+prescriptions)\??$/i.test(pLower)
+        ) {
+            return {
+                intent: "GET_PRESCRIPTIONS",
+                toolName: "getMyPrescriptions",
+                toolArgs: { prompt: promptMessage },
+                missingRequiredFields: [],
+                requiredCapabilities: [],
+                confidence: 0.98,
+                modelUsed: "deterministic_rules"
+            };
+        }
+
+        // Patient Upcoming Appointments:
+        if (
+            /\b(?:upcoming appointments?|my upcoming appointments?|next appointment)\b/i.test(pLower) ||
+            /^(?:show\s+my\s+upcoming\s+appointments|upcoming\s+appointments)\??$/i.test(pLower)
+        ) {
+            return {
+                intent: "GET_APPOINTMENTS",
+                toolName: "getMyAppointments",
+                toolArgs: { status: "BOOKED", prompt: promptMessage },
+                missingRequiredFields: [],
+                requiredCapabilities: [],
+                confidence: 0.98,
+                modelUsed: "deterministic_rules"
+            };
+        }
+
+        // Patient Find Care / Doctor Discovery:
+        if (
+            /\b(?:find care|search care|look for care|care discovery)\b/i.test(pLower) ||
+            /^(?:what\s+can\s+you\s+tell\s+me\s+about\s+)?find\s+care\??$/i.test(pLower)
+        ) {
+            return {
+                intent: "GET_DOCTORS",
+                toolName: "getDoctors",
+                toolArgs: { prompt: promptMessage },
+                missingRequiredFields: [],
+                requiredCapabilities: [],
+                confidence: 0.98,
+                modelUsed: "deterministic_rules"
+            };
+        }
+    }
+
+    if (role === "admin" || role === "organization_admin") {
+        if (
+            /\b(?:department|specialty)\b/i.test(pLower) &&
+            /\b(?:most|highest|busiest|more)\b/i.test(pLower) &&
+            /\b(?:appointments?|bookings?|volume)\b/i.test(pLower)
+        ) {
+            return {
+                intent: "GET_HEALTHCARE_ANALYTICS",
+                toolName: "getHealthcareAnalytics",
+                toolArgs: {
+                    groupBy: "department",
+                    metric: "appointments",
+                    timeframe: pLower.includes("this week") ? "this_week" : "this_month",
+                    prompt: promptMessage
+                },
+                missingRequiredFields: [],
+                requiredCapabilities: [],
+                confidence: 0.98,
+                modelUsed: "deterministic_rules"
+            };
+        }
+    }
+
+    if (role === "super_admin") {
+        if (
+            /\b(?:how many|number of|active|total)\b/i.test(pLower) &&
+            /\b(?:organizations?|clinics?)\b/i.test(pLower)
+        ) {
+            return {
+                intent: "GET_PLATFORM_STATS",
+                toolName: "getPlatformStats",
+                toolArgs: { prompt: promptMessage },
+                missingRequiredFields: [],
+                requiredCapabilities: [],
+                confidence: 0.98,
+                modelUsed: "deterministic_rules"
+            };
+        }
+
+        if (pLower.includes("compare") && (pLower.includes("organization") || pLower.includes("clinic") || pLower.includes("performance") || pLower.includes("and") || pLower.includes("vs"))) {
+            return {
+                intent: "COMPARE_ORGANIZATIONS",
+                toolName: "compareOrganizations",
+                toolArgs: {},
+                missingRequiredFields: [],
+                requiredCapabilities: [],
+                confidence: 0.98,
+                modelUsed: "deterministic_rules"
+            };
+        }
+    }
 
     const compactTrace = (previousToolResults || []).slice(-6).map((step) => ({
         toolName: step.toolName,
@@ -504,13 +771,16 @@ export const extractIntent = async (
     if (!Array.isArray(missingRequiredFields)) missingRequiredFields = [];
     confidence = Number.isFinite(Number(confidence)) ? Math.max(0, Math.min(1, Number(confidence))) : 0;
 
-    toolName = toolName && toolName !== "null" && toolName !== "undefined"
-        ? String(toolName)
-        : INTENT_TO_TOOL[String(intent).toUpperCase()] || null;
+    if (toolName) {
+        toolName = TOOL_NAME_ALIASES[toolName] || toolName;
+    }
+    if (!toolName || toolName === "null" || toolName === "undefined") {
+        const upIntent = String(intent || "").toUpperCase();
+        toolName = INTENT_TO_TOOL[upIntent] || TOOL_NAME_ALIASES[intent] || TOOL_NAME_ALIASES[upIntent] || null;
+    }
 
     // Canonical Doctor Department Query (Rule 6.10):
     // "What department am I in?", "Which department do I belong to?", "What is my specialty?"
-    const pLower = promptMessage.toLowerCase();
     if (role === "doctor" && (
         pLower.includes("what department am i in") ||
         pLower.includes("which department do i belong") ||
@@ -523,6 +793,52 @@ export const extractIntent = async (
         toolName = "getMyDoctorProfile";
         intent = "GET_DOCTOR_PROFILE";
         confidence = 0.95;
+    }
+
+    // Phase 5: Broad Shared Medical Record Discovery Routing & Patient Discovery (Doctor Role)
+    // "What can you tell me about Patient Records?", "Show me the shared medical records.", etc.
+    if (role === "doctor") {
+        // Deterministic Doctor Patient Discovery (Phase 7 Fix):
+        // Generic discovery queries when NO active patient context exists
+        const isPatientRecordsDiscovery = (
+            /^(?:what\s+can\s+you\s+tell\s+me\s+about\s+)?patient\s+records?\??$/i.test(pLower.trim()) ||
+            (/\b(show|list|view|what|tell\s+me)\b/i.test(pLower) && /\b(patient\s+records?|my\s+patients|patient\s+information|patient\s+history)\b/i.test(pLower)) ||
+            /^(show\s+patient\s+records|show\s+my\s+patients|my\s+patient\s+records|patient\s+information|patient\s+history|what\s+can\s+you\s+tell\s+me\s+about\s+patient\s+records|patient\s+records)$/i.test(pLower.trim())
+        );
+
+        if (isPatientRecordsDiscovery && !agentState?.patientId) {
+            toolName = "getDoctorAuthorizedPatients";
+            intent = "GET_DOCTOR_AUTHORIZED_PATIENTS";
+            confidence = 0.98;
+            missingRequiredFields = [];
+            toolArgs = {};
+        }
+
+        const isBroadSharedRecord = (
+            (/\b(show|list|view|what|tell\s+me|find|get)\b/i.test(pLower) &&
+             /\b(shared\s+(?:medical\s+)?records?|shared\s+reports?|shared\s+documents?)\b/i.test(pLower)) ||
+            /^(show\s+(?:all\s+)?shared\s+records|show\s+shared\s+medical\s+records|what\s+shared\s+medical\s+records\s+does\s+this\s+patient\s+have|tell\s+me\s+something\s+about\s+the\s+shared\s+medical\s+records|show\s+me\s+the\s+shared\s+medical\s+records|show\s+me\s+this\s+patient'?s?\s+shared\s+medical\s+records)$/i.test(pLower.trim())
+        );
+
+        // Do not intercept if doctor is asking a specific document search question (e.g. "what does the shared record say about diabetes")
+        const isSpecificSearchQuery = /\b(what does (?:it|the record|the report) say about|does the patient have|search for|hba1c|blood pressure|vitals|creatinine)\b/i.test(pLower);
+
+        if ((isBroadSharedRecord || (isPatientRecordsDiscovery && agentState?.patientId)) && !isSpecificSearchQuery) {
+            toolName = "getSharedMedicalRecords";
+            intent = "GET_SHARED_MEDICAL_RECORDS";
+            confidence = 0.98;
+            missingRequiredFields = [];
+            if (agentState?.patientId) {
+                toolArgs.patientId = agentState.patientId;
+            }
+        }
+    }
+
+    // Phase 5: Cross-Tenant Organization Comparison (Super Admin Role)
+    if (role === "super_admin" && pLower.includes("compare") && (pLower.includes("organization") || pLower.includes("clinic") || pLower.includes("performance") || pLower.includes("and") || pLower.includes("vs"))) {
+        toolName = "compareOrganizations";
+        intent = "COMPARE_ORGANIZATIONS";
+        confidence = 0.98;
     }
 
     // Strict Financial Intent Routing (Rule 6.7):
@@ -707,6 +1023,10 @@ export const extractIntent = async (
     // For initial booking, intermediate fields like doctorId, appointmentDate, startTime are NOT missing errors
     if (role === "patient" && (intent === "BOOK_APPOINTMENT" || intent === "CLASSIFY_SYMPTOMS" || toolName === "classifySpecialtyFromSymptoms")) {
         resolvedMissing = resolvedMissing.filter(f => !["doctorId", "appointmentDate", "startTime", "endTime"].includes(f));
+    }
+
+    if (toolName === "getSharedMedicalRecords" || toolName === "draftClinicalNotes" || toolName === "draftPrescription") {
+        resolvedMissing = resolvedMissing.filter(f => f !== "appointmentId");
     }
 
     if (toolArgs.appointmentDate && !toolArgs.date) {

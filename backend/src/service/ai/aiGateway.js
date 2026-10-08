@@ -43,12 +43,18 @@ export const PURE_DATA_TOOLS = [
     "draftClinicalNotes",
     "draftPrescription",
     "getDoctorLeave",
-    "getMyDoctorProfile"
+    "getMyDoctorProfile",
+    "getSharedMedicalRecords",
+    "compareOrganizations",
+    "searchPatientDocuments",
+    "searchMyDocuments",
+    "getDoctorAuthorizedPatients",
+    "lookupDoctorPatient"
 ];
 
 const ORDINALS = ["First", "Second", "Third", "Fourth", "Fifth"];
 
-export const templatePureDataResponse = (toolName, result) => {
+export const templatePureDataResponse = (toolName, result, userRole = null, args = {}) => {
     if (!result) return "No data returned for your request.";
 
     if (toolName === "getDoctorLeave") {
@@ -138,6 +144,25 @@ export const templatePureDataResponse = (toolName, result) => {
         const list = Array.isArray(result) ? result : [];
         if (list.length === 0) return "You currently have no scheduled appointments.";
 
+        const isToday = (args && (args.timeframe === "today" || (args.prompt && /\btoday\b/i.test(args.prompt)))) ||
+            (list.length > 0 && list.every(a => {
+                if (!a.appointmentDate) return false;
+                const aDate = new Date(a.appointmentDate);
+                const now = new Date();
+                return aDate.getFullYear() === now.getFullYear() && aDate.getMonth() === now.getMonth() && aDate.getDate() === now.getDate();
+            }));
+        if ((userRole === "doctor" || !userRole) && isToday) {
+            const countText = `You have ${list.length} consultation${list.length > 1 ? 's' : ''} today:`;
+            const items = list.map(appt => {
+                const patientName = appt.patientName || appt.patientId?.userId?.name || appt.patientId?.name || "Patient";
+                const timeStr = appt.startTime || "Scheduled time";
+                const channelStr = appt.consultationType === "online" ? "Online Video" : "In-Clinic";
+                const reasonStr = appt.reasonForVisit || appt.reason || appt.triageInfo?.chiefComplaint || "Routine clinical consultation & health vitals review";
+                return `• ${patientName} — ${timeStr}\n• ${channelStr}\n• ${reasonStr}`;
+            });
+            return `${countText}\n\n${items.join("\n\n")}`;
+        }
+
         const countText = `You have ${list.length} appointment${list.length > 1 ? 's' : ''}.`;
         const details = [];
 
@@ -183,7 +208,7 @@ export const templatePureDataResponse = (toolName, result) => {
         }
 
         const details = list.map(d => {
-            const dName = d.doctorName || "Doctor";
+            const dName = formatDoctorName(d.doctorName || d.name, "Doctor") || "Doctor";
             const spec = d.specialization ? ` (${d.specialization})` : '';
             if (!d.isAvailable || d.slotCount === 0) {
                 return `• ${dName}${spec}: Not available on ${targetDate}.`;
@@ -219,7 +244,7 @@ export const templatePureDataResponse = (toolName, result) => {
         if (list.length === 0) return "You currently have no prescriptions on record.";
 
         const details = list.map((p, idx) => {
-            const docName = p.doctorId?.userId?.name || p.doctorId?.name || "Doctor";
+            const docName = formatDoctorName(p.doctorId?.userId?.name || p.doctorId?.name, "Doctor") || "Doctor";
             const dateStr = p.createdAt ? new Date(p.createdAt).toISOString().split('T')[0] : "N/A";
             const meds = Array.isArray(p.medicines) ? p.medicines.map(m =>
                 `${m.medicineName || m.name || 'Medicine'} (${m.dosage || 'N/A'}, ${m.frequency || 'N/A'})`
@@ -246,11 +271,18 @@ export const templatePureDataResponse = (toolName, result) => {
         return response;
     }
 
-    if (toolName === "summarizeAppointmentContext") {
-        return `PRE-VISIT CLINICAL BRIEF:\n• Patient: ${result.patientName || 'Patient'}\n• Chief Complaint / Reason for Visit: ${result.chiefComplaint || 'Not specified'}\n• Medical Records Summary:\n${result.medicalRecordsSummary || 'No past records on file'}\n• Active Prescription History:\n${result.prescriptionSummary || 'No active prescriptions'}`;
+    if (toolName === "summarizeAppointmentContext" || toolName === "getPreVisitBrief") {
+        return result.summaryText || `PRE-VISIT CLINICAL BRIEF:\n• Patient: ${result.patientName || 'Patient'}\n• Chief Complaint / Reason for Visit: ${result.chiefComplaint || 'Not specified'}\n• Medical Records Summary:\n${result.medicalRecordsSummary || 'No past records on file'}\n• Active Prescription History:\n${result.prescriptionSummary || 'No active prescriptions'}`;
+    }
+
+    if (toolName === "getClinicalSummary") {
+        return result.formattedSummary || `Clinical summary for ${result.patientName || 'Patient'}`;
     }
 
     if (toolName === "draftClinicalNotes") {
+        if (result?.needsSelection && (result.aiResponse || result.message)) {
+            return result.aiResponse || result.message;
+        }
         return result.draftContent || (result.soapNote ? `SOAP CLINICAL NOTE DRAFT:\n• S: ${result.soapNote.subjective}\n• O: ${result.soapNote.objective}\n• A: ${result.soapNote.assessment}\n• P: ${result.soapNote.plan}` : "Clinical note draft generated.");
     }
 
@@ -261,10 +293,50 @@ export const templatePureDataResponse = (toolName, result) => {
 
     if (toolName === "getMyMedicalRecords") {
         const list = Array.isArray(result) ? result : [];
-        return `Retrieved ${list.length} medical record(s).`;
+        if (list.length === 0) return "You currently have no medical records on file.";
+        return `You have ${list.length} medical record(s) on file.`;
     }
 
-    return typeof result === "object" ? JSON.stringify(result, null, 2) : String(result);
+    if (toolName === "getDoctorAuthorizedPatients") {
+        if (result.response || result.message) return result.response || result.message;
+        const patients = Array.isArray(result.patients) ? result.patients : [];
+        if (patients.length === 0) return "You currently do not have any authorized patients with scheduled appointments or shared records in your organization.";
+        if (patients.length === 1) return `I found one patient available to you: ${patients[0].name}.\n\nWould you like me to review their records?`;
+        const items = patients.map((p, i) => `${i + 1}. ${p.name}`).join("\n");
+        return `I can help with that. Here are the patients you currently have access to:\n\n${items}\n\nWhich patient would you like to review?`;
+    }
+
+    if (toolName === "getSharedMedicalRecords") {
+        if (result.response || result.message) return result.response || result.message;
+        const records = Array.isArray(result.records) ? result.records : [];
+        if (records.length === 0) return "I couldn't find any shared medical records for this patient available to you.";
+        const items = records.map((r, i) => `${i + 1}. ${r.title} — ${r.date}`).join("\n");
+        return `I found ${records.length} shared medical record${records.length > 1 ? "s" : ""}:\n\n${items}\n\nWhich one would you like me to review?\nYou can choose a number or say 'all'.`;
+    }
+
+    if (toolName === "compareOrganizations") {
+        if (result.groundedNarrative || result.summary) return result.groundedNarrative || result.summary;
+        const comps = Array.isArray(result.comparisons) ? result.comparisons : [];
+        if (comps.length === 0) return "No organization comparison data available.";
+        const items = comps.map(c => `• ${c.name}: ${c.totalAppointments} appointments (${c.completed} completed, ${c.cancelled} cancelled), ${c.totalDoctors} doctors`).join("\n");
+        return `Organization Comparison (${result.timeframe || 'All-Time'}):\n${items}`;
+    }
+
+    if (toolName === "searchPatientDocuments" || toolName === "searchMyDocuments") {
+        if (result.answer) return result.answer;
+        if (result.message) return result.message;
+        return "I couldn't find that information in the records available to you.";
+    }
+
+    if (result && typeof result === "object") {
+        if (result.message) return result.message;
+        if (result.summary) return result.summary;
+        if (result.description) return result.description;
+        if (result.aiResponse) return result.aiResponse;
+        if (result.error) return `Operation notice: ${result.error}`;
+    }
+
+    return String(result || "Operation completed successfully.");
 };
 
 export const getAIChatHistoryService = async (userId, organizationId) => {

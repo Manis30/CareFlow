@@ -48,7 +48,13 @@ const PARAPHRASE_WHITELIST = new Set([
     "department", "departments", "revenue", "volume", "clinic", "clinics", "system", "trends", "patients", "doctors", "consultation",
     "consultations", "intake", "assessment", "plan", "review", "context", "brief", "performance", "breakdown", "totals", "total",
     "count", "average", "utilization", "operational", "visit", "visits", "registered", "registration", "registrations", "growth",
-    "distribution", "share", "organization", "organizations", "network", "capacity", "schedule"
+    "distribution", "share", "organization", "organizations", "network", "capacity", "schedule",
+    "problems", "problem", "findings", "finding", "recommendations", "recommendation", "panel", "basic",
+    "metabolic", "comprehensive", "allergies", "allergy", "vitals", "vital", "examination", "unspecified",
+    "syndrome", "chronic", "essential", "primary", "secondary", "moderate", "severe", "mild",
+    "fictional", "synthetic", "female", "male", "routine", "reported", "encounter", "concise",
+    "follow-up", "followup", "substance", "reaction", "severity", "loinc", "ref", "reference",
+    "flag", "flags", "unit", "units", "range", "onset", "route", "frequency"
 ]);
 
 export const checkGroundingGuardrail = (generatedText, contextData) => {
@@ -62,13 +68,25 @@ export const checkGroundingGuardrail = (generatedText, contextData) => {
     const contextTokens = new Set(contextStr.toLowerCase().match(/[a-z0-9'-]+/g) || []);
     const contextNumbers = new Set(contextStr.match(/\b\d+(?:\.\d+)?\b/g) || []);
 
+    // Also infer possible age from birth years documented in context (e.g. 1958 -> ~68)
+    const birthYears = contextStr.match(/\b(19\d{2}|20\d{2})\b/g) || [];
+    const currentYear = new Date().getFullYear();
+    for (const bYear of birthYears) {
+        const inferredAge = currentYear - parseInt(bYear, 10);
+        if (inferredAge >= 0 && inferredAge <= 120) {
+            contextNumbers.add(String(inferredAge));
+            contextNumbers.add(String(inferredAge - 1));
+            contextNumbers.add(String(inferredAge + 1));
+        }
+    }
+
     const ungroundedItems = [];
 
     // 2. Check Numbers in generatedText
     const genNumbers = generatedText.match(/\b\d+(?:\.\d+)?\b/g) || [];
     for (const num of genNumbers) {
-        // Skip common low single digits 1-5 if context has numbers or words
-        if (["1", "2", "3", "4", "5"].includes(num)) continue;
+        // Skip common low single digits 1-10 used for bullet points or lists
+        if (["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"].includes(num)) continue;
 
         if (!contextNumbers.has(num) && !contextStr.includes(num)) {
             ungroundedItems.push(`Number '${num}'`);
@@ -112,12 +130,18 @@ export const checkGroundingGuardrail = (generatedText, contextData) => {
     const isGrounded = ungroundedItems.length === 0;
 
     if (!isGrounded) {
-        console.warn(`[Grounding Guardrail Warning] Guardrail check failed: ${ungroundedItems.join(", ")}. Falling back to raw context.`);
+        console.warn(`[Grounding Guardrail Warning] Guardrail check failed: ${ungroundedItems.join(", ")}.`);
     }
+
+    // Never return raw OCR / long document transcripts as a fallback summary
+    const isRawDocument = typeof contextData === "string" && (contextData.length > 200 || contextData.includes("\n"));
+    const fallbackText = isRawDocument
+        ? null
+        : (typeof contextData === "string" ? contextData : JSON.stringify(contextData, null, 2));
 
     return {
         isGrounded,
         ungroundedItems,
-        fallbackText: typeof contextData === "string" ? contextData : JSON.stringify(contextData, null, 2)
+        fallbackText
     };
 };

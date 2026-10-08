@@ -83,7 +83,9 @@ const UploadRecordModal = ({ isOpen, onClose, appointmentId, onSuccess }) => {
 
         <FileUpload
           label="Document / Image File"
-          accept="image/*,application/pdf"
+          accept="image/*,application/pdf,.doc,.docx,.txt,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
+          placeholder="Click to upload medical document or scan"
+          hint="PDF, PNG, JPG, WEBP, DOC, DOCX, TXT (up to 10MB)"
           onChange={(f) => setFile(f)}
           required
         />

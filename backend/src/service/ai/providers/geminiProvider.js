@@ -9,6 +9,7 @@ export class GeminiProvider extends AIProviderInterface {
         super();
         this.apiKey = process.env.GEMINI_API_KEY;
         this.client = null;
+        this.cooldownUntil = 0;
         if (this.apiKey) {
             try {
                 this.client = new GoogleGenAI({ apiKey: this.apiKey });
@@ -22,7 +23,26 @@ export class GeminiProvider extends AIProviderInterface {
         return "gemini";
     }
 
+    markUnavailable(durationMs = 60000) {
+        this.cooldownUntil = Date.now() + durationMs;
+    }
+
+    resetCooldown() {
+        this.cooldownUntil = 0;
+    }
+
     isAvailable() {
+        if (!this.client && process.env.GEMINI_API_KEY) {
+            this.apiKey = process.env.GEMINI_API_KEY;
+            try {
+                this.client = new GoogleGenAI({ apiKey: this.apiKey });
+            } catch (err) {
+                console.error("[GeminiProvider Init Error]:", err.message);
+            }
+        }
+        if (this.cooldownUntil && Date.now() < this.cooldownUntil) {
+            return false;
+        }
         return Boolean(this.client && this.apiKey);
     }
 
@@ -32,8 +52,8 @@ export class GeminiProvider extends AIProviderInterface {
         }
 
         const startTime = Date.now();
-        const primaryModel = process.env.GEMINI_MODEL || "gemini-3.6-flash";
-        const candidateModels = [primaryModel, "gemini-3.5-flash-lite", "gemini-3.1-pro-preview"].filter((v, i, a) => a.indexOf(v) === i);
+        const primaryModel = process.env.GEMINI_MODEL || "gemini-3.5-flash";
+        const candidateModels = [primaryModel, "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.7-flash", "gemini-3.8-flash", "gemini-3.6-flash"].filter((v, i, a) => a.indexOf(v) === i);
         let lastError = null;
 
         for (const model of candidateModels) {
@@ -83,9 +103,12 @@ export class GeminiProvider extends AIProviderInterface {
                     };
                 } catch (error) {
                     lastError = error;
-                    const isQuotaExhausted = error.message?.includes("RESOURCE_EXHAUSTED") || error.message?.includes("Quota exceeded");
+                    const isQuotaExhausted = error.status === 429 ||
+                        error.message?.includes("RESOURCE_EXHAUSTED") ||
+                        error.message?.includes("Quota exceeded") ||
+                        error.message?.includes("429");
                     if (isQuotaExhausted) {
-                        console.warn(`[Gemini Quota Exhausted on ${model}]: Fast-failing to fallback provider.`);
+                        console.warn(`[Gemini Quota on ${model}]: Candidate model over quota. Trying next candidate model...`);
                         break;
                     }
                     const isTransient = error.message?.includes("503") || error.message?.includes("demand");
@@ -96,6 +119,20 @@ export class GeminiProvider extends AIProviderInterface {
                     console.warn(`[Gemini Candidate Model ${model} Failed]:`, error.message);
                     break;
                 }
+            }
+        }
+
+        if (lastError) {
+            const isQuota = lastError.status === 429 ||
+                lastError.message?.includes("RESOURCE_EXHAUSTED") ||
+                lastError.message?.includes("Quota exceeded") ||
+                lastError.message?.includes("429");
+            if (isQuota) {
+                this.markUnavailable(60000);
+                console.warn("[Gemini Quota Exhausted on all candidates]: Marked Gemini unavailable (cooldown 60s). Fast-failing to Groq fallback.");
+                const quotaErr = new Error(`Gemini quota exhausted across candidate models: ${lastError.message}`);
+                quotaErr.isQuotaExhausted = true;
+                throw quotaErr;
             }
         }
 

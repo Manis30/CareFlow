@@ -14,6 +14,9 @@ export class GroqProvider extends AIProviderInterface {
     }
 
     isAvailable() {
+        if (!this.apiKey && process.env.GROQ_API_KEY) {
+            this.apiKey = process.env.GROQ_API_KEY;
+        }
         return Boolean(this.apiKey);
     }
 
@@ -23,23 +26,20 @@ export class GroqProvider extends AIProviderInterface {
         }
 
         const startTime = Date.now();
-        let enhancedSystemInstruction = systemInstruction || "You are a professional healthcare assistant for CareFlow.";
+        let jsonHeader = "";
         if (responseSchema) {
             let schemaFields = "intent, toolName, toolArgs, missingRequiredFields, confidence";
             if (responseSchema.properties) {
                 schemaFields = Object.keys(responseSchema.properties).join(", ");
             }
-            enhancedSystemInstruction += `\n\nCRITICAL JSON SCHEMA REQUIREMENT: You MUST respond ONLY with a valid JSON object. It MUST strictly contain the following fields: ${schemaFields}. Do not output any markdown code blocks or additional text.`;
+            jsonHeader = `CRITICAL JSON REQUIREMENT: You MUST respond ONLY with a valid JSON object containing fields: ${schemaFields}. Do not output markdown code blocks.\n\n`;
         }
 
-        const model = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
-        const maxLen = 16000;
-        const safePrompt = typeof prompt === "string" && prompt.length > maxLen
-            ? prompt.slice(0, maxLen) + "\n...[Content truncated for length]"
-            : prompt;
-        const safeSys = typeof enhancedSystemInstruction === "string" && enhancedSystemInstruction.length > 8000
-            ? enhancedSystemInstruction.slice(0, 8000)
-            : enhancedSystemInstruction;
+        const model = process.env.GROQ_MODEL || "openai/gpt-oss-20b";
+        const rawSys = systemInstruction || "You are a professional healthcare assistant for CareFlow.";
+        const safeSys = jsonHeader + (typeof rawSys === "string" ? rawSys.slice(0, 3500) : "");
+        const userJsonSuffix = responseSchema ? "\n\nRespond strictly with a valid JSON object." : "";
+        const safePrompt = (typeof prompt === "string" ? prompt.slice(0, 3500) : prompt) + userJsonSuffix;
 
         const body = {
             model,
@@ -72,13 +72,17 @@ export class GroqProvider extends AIProviderInterface {
 
                 if (res.status === 429 && attempt < 2) {
                     const retryAfter = Number(res.headers.get("retry-after") || 2);
-                    console.warn(`[GroqProvider 429 Rate Limit]: Backing off for ${retryAfter}s (attempt ${attempt + 1})...`);
-                    await new Promise(r => setTimeout(r, Math.max(2000, retryAfter * 1000)));
+                    console.warn(`[GroqProvider 429 Rate Limit]: Backing off for ${Math.min(retryAfter, 10)}s (attempt ${attempt + 1})...`);
+                    if (body.model === "openai/gpt-oss-120b") {
+                        body.model = "openai/gpt-oss-20b";
+                    }
+                    await new Promise(r => setTimeout(r, Math.min(Math.max(1500, retryAfter * 1000), 10000)));
                     continue;
                 }
 
                 if (!res.ok) {
-                    throw new Error(`Groq HTTP ${res.status}: ${res.statusText}`);
+                    const errText = await res.text().catch(() => "");
+                    throw new Error(`Groq HTTP ${res.status}: ${res.statusText} ${errText}`.trim());
                 }
 
             const data = await res.json();

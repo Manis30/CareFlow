@@ -1,5 +1,5 @@
 import React from 'react';
-import { FileHeart, User, Eye, Share2, Lock, Unlock } from 'lucide-react';
+import { FileHeart, User, Eye, Share2, Lock, Unlock, Download } from 'lucide-react';
 import Button from '../common/Button';
 import { formatDate } from '../../utils/formatDate';
 
@@ -7,6 +7,7 @@ export const MedicalRecordCard = ({
   record,
   onPreview,
   onShare,
+  onDownload,
   className = ''
 }) => {
   if (!record) return null;
@@ -78,6 +79,17 @@ export const MedicalRecordCard = ({
               className="text-xs px-2.5 py-1 rounded-xl text-slate-600 hover:text-blue-600"
             >
               Share
+            </Button>
+          )}
+          {onDownload && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onDownload}
+              icon={Download}
+              className="text-xs px-2.5 py-1 rounded-xl text-slate-600 hover:text-blue-600"
+            >
+              Download
             </Button>
           )}
           {onPreview && (

@@ -614,11 +614,19 @@ export const getUserConversationsService = async (userId, rawUserRole) => {
         const adminId = toIdString(orgAdmin._id);
         const key = `admin:${adminId}`;
 
-        const conv = await ConversationModel.findOne({
+        let conv = await ConversationModel.findOne({
             conversationType: { $in: ["ORGANIZATION_ADMIN_DOCTOR", "ORG_ADMIN_DOCTOR"] },
             organizationAdminId: orgAdmin._id,
             doctorId: doctor._id
         });
+
+        if (!conv) {
+            conv = await getOrCreateConversation({
+                conversationType: "ORGANIZATION_ADMIN_DOCTOR",
+                organizationAdminId: orgAdmin._id,
+                doctorId: doctor._id
+            });
+        }
 
         return [{
             _id: conv?._id || null,
@@ -849,6 +857,38 @@ export const getOrCreateConversationService = async (userId, rawUserRole, recipi
                 organizationAdminId: userId
             });
         }
+    }
+
+    if (userRole === "doctor") {
+        const doctor = await getDoctorByUserId(userId);
+        if (!doctor) throw new AppError(404, "Doctor profile not found.");
+
+        let orgAdmin = null;
+        if (recipientId) {
+            orgAdmin = await UserModel.findOne({
+                _id: recipientId,
+                role: { $in: ["organization_admin", "admin", "org_admin"] }
+            });
+        }
+        if (!orgAdmin && doctor.organizationId) {
+            orgAdmin = await UserModel.findOne({
+                organizationId: doctor.organizationId,
+                role: { $in: ["organization_admin", "admin", "org_admin"] }
+            });
+        }
+        if (!orgAdmin) throw new AppError(404, "Target Organization Admin user not found.");
+
+        const docOrgId = toIdString(doctor.organizationId);
+        const adminOrgId = toIdString(orgAdmin.organizationId);
+        if (!docOrgId || !adminOrgId || docOrgId !== adminOrgId) {
+            throw new AppError(403, "Doctor can chat ONLY with the Organization Admin of their own organization.");
+        }
+
+        return await getOrCreateConversation({
+            conversationType: "ORGANIZATION_ADMIN_DOCTOR",
+            organizationAdminId: orgAdmin._id,
+            doctorId: doctor._id
+        });
     }
 
     throw new AppError(400, "Unable to resolve conversation for this user role.");

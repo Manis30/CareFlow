@@ -12,6 +12,7 @@ import {
     sendMedicationReminderEmail,
     sendFollowUpReminderEmail
 } from "../email.js";
+import { formatDoctorName } from "../../util/formatters.js";
 
 /**
  * MongoDB-Backed Distributed Lock Helper (Rule 14)
@@ -172,7 +173,7 @@ export const processAppointmentReminders = async () => {
             });
 
             if (!existing) {
-                const docName = appt.doctorId?.userId?.name ? `Dr. ${appt.doctorId.userId.name}` : "Doctor";
+                const docName = formatDoctorName(appt.doctorId?.userId?.name, "Doctor") || "Doctor";
                 const clinicName = appt.organizationId?.name || "CareFlow Clinic";
                 const timeText = is24h ? "tomorrow" : "in about 2 hours";
 
@@ -243,7 +244,7 @@ export const processFollowUpReminders = async () => {
             });
 
             if (!existing) {
-                const docName = f.doctorId?.userId?.name ? `Dr. ${f.doctorId.userId.name}` : "Doctor";
+                const docName = formatDoctorName(f.doctorId?.userId?.name, "Doctor") || "Doctor";
 
                 await NotificationModel.create({
                     userId: patientUser._id,

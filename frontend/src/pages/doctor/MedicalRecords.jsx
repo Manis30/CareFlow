@@ -13,11 +13,13 @@ import { formatDate } from '../../utils/formatDate';
 import { formatTime } from '../../utils/formatTime';
 import { formatName } from '../../utils/formatters';
 import { handleDownload } from '../../utils/downloadFile';
+import RecordPreviewModal from '../../components/medicalRecord/RecordPreviewModal';
 
 const DoctorMedicalRecords = () => {
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [previewModal, setPreviewModal] = useState({ isOpen: false, record: null });
 
   const { page, setPage, totalItems, totalPages, paginatedItems } = usePagination(records, 9);
 
@@ -149,18 +151,17 @@ const DoctorMedicalRecords = () => {
                   {/* Actions */}
                   {rec.file?.url && (
                     <div className="pt-3 border-t border-slate-100 flex items-center gap-2">
-                      <a
-                        href={rec.file.url}
-                        target="_blank"
-                        rel="noreferrer"
+                      <button
+                        type="button"
+                        onClick={() => setPreviewModal({ isOpen: true, record: rec })}
                         className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-800 text-xs font-semibold transition-colors cursor-pointer"
                       >
                         <Eye className="w-3.5 h-3.5" />
                         View
-                      </a>
+                      </button>
                       <button
                         type="button"
-                        onClick={() => handleDownload(rec.file?.url, rec.title)}
+                        onClick={() => handleDownload(rec)}
                         className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-colors shadow-2xs cursor-pointer"
                       >
                         <Download className="w-3.5 h-3.5" />
@@ -183,6 +184,14 @@ const DoctorMedicalRecords = () => {
             />
           </div>
         </div>
+      )}
+
+      {previewModal.isOpen && (
+        <RecordPreviewModal
+          isOpen={previewModal.isOpen}
+          record={previewModal.record}
+          onClose={() => setPreviewModal({ isOpen: false, record: null })}
+        />
       )}
     </ContentContainer>
   );

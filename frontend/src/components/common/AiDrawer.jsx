@@ -257,16 +257,39 @@ export const AiDrawer = ({ isOpen: controlledIsOpen, onClose: controlledOnClose 
             citations: data.citations || []
           }
         ]);
+      } else if (
+        data?.responseType === 'DRAFT_REQUIRING_REVIEW' ||
+        data?.result?.isDraft === true ||
+        data?.result?.responseType === 'DRAFT_REQUIRING_REVIEW'
+      ) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            sender: 'ai',
+            isDraftReview: true,
+            draftText: data.aiResponse || data.result?.draftContent || (typeof data.result === 'string' ? data.result : JSON.stringify(data.result, null, 2)),
+            text: data.aiResponse || data.result?.draftContent,
+            citations: data.citations || []
+          }
+        ]);
       } else {
-        // Safe Grounded Answer or Clarification
-        const responseText = data?.aiResponse || (typeof data?.result === 'string' ? data.result : data?.result?.summary || (data?.result ? JSON.stringify(data.result, null, 2) : "I couldn't verify that information."));
-        const cleanText = typeof responseText === 'object' ? (responseText.response || JSON.stringify(responseText)) : responseText;
+        // Safe Grounded Answer, Clarification, or Pure Data Response
+        const resObj = data?.result;
+        const fallbackText = typeof resObj === 'string'
+          ? resObj
+          : resObj?.message || resObj?.summary || resObj?.answer || resObj?.response || "I couldn't verify that information.";
+        const responseText = data?.aiResponse || fallbackText;
+        const cleanText = typeof responseText === 'object'
+          ? (responseText?.message || responseText?.response || responseText?.summary || "Information processed.")
+          : String(responseText || "I couldn't verify that information.");
+
         setMessages((prev) => [
           ...prev,
           {
             sender: 'ai',
             text: cleanText,
             citations: data?.citations || data?.result?.citations || [],
+            hasLowConfidenceWarning: Boolean(data?.hasLowConfidenceWarning || data?.result?.hasLowConfidenceWarning),
             responseType: data?.responseType || 'ANSWER'
           }
         ]);
@@ -432,6 +455,14 @@ export const AiDrawer = ({ isOpen: controlledIsOpen, onClose: controlledOnClose 
                             />
                             {msg.citations && <AICitation citations={msg.citations} />}
                           </div>
+                        ) : msg.isDraftReview ? (
+                          /* Structured Physician Draft Note */
+                          <div>
+                            <AIDraftReview draftText={msg.draftText || msg.text} />
+                            {msg.citations && msg.citations.length > 0 && (
+                              <AICitation citations={msg.citations} />
+                            )}
+                          </div>
                         ) : msg.isError ? (
                           /* Error Notice */
                           <AIError
@@ -441,7 +472,18 @@ export const AiDrawer = ({ isOpen: controlledIsOpen, onClose: controlledOnClose 
                         ) : (
                           /* Standard Grounded Intelligence Narrative */
                           <div className="bg-white border border-slate-200/80 p-4 rounded-2xl rounded-tl-xs shadow-xs text-xs sm:text-sm text-slate-800 leading-relaxed space-y-2">
+                            {msg.responseType === 'PRE_VISIT_BRIEF' && (
+                              <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 text-[10px] font-bold tracking-wider uppercase mb-1">
+                                Pre-Visit Clinical Brief
+                              </div>
+                            )}
                             <div className="whitespace-pre-line">{msg.text}</div>
+                            {msg.hasLowConfidenceWarning && (
+                              <div className="mt-2 p-2.5 rounded-xl bg-amber-50 border border-amber-200/80 text-amber-800 text-xs flex items-center gap-2">
+                                <span className="font-semibold shrink-0">⚠️ Low OCR Confidence:</span>
+                                <span>Portions of this scanned document have degraded clarity. Cross-verify critical values with original records.</span>
+                              </div>
+                            )}
                             {msg.citations && msg.citations.length > 0 && (
                               <AICitation citations={msg.citations} />
                             )}

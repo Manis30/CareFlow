@@ -3,7 +3,9 @@ import { UploadCloud, File, X, Camera } from 'lucide-react';
 
 const FileUpload = ({
   label,
-  accept = 'image/*,application/pdf',
+  accept = 'image/*,application/pdf,.doc,.docx,.txt,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain',
+  placeholder = 'Click to upload document or image',
+  hint = 'PDF, PNG, JPG, WEBP, DOC, DOCX, or TXT (max 10MB)',
   onChange,
   error,
   required = false,
@@ -118,8 +120,8 @@ const FileUpload = ({
           }`}
         >
           <UploadCloud className="w-8 h-8 text-teal-600 mb-2" />
-          <p className="text-xs font-bold text-slate-800">Click to upload doctor photo</p>
-          <p className="text-[10px] text-slate-400 mt-0.5">PNG, JPG, WEBP, or PDF (max 5MB)</p>
+          <p className="text-xs font-bold text-slate-800">{placeholder}</p>
+          <p className="text-[10px] text-slate-400 mt-0.5">{hint}</p>
           <input
             ref={fileInputRef}
             type="file"

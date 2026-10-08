@@ -47,6 +47,14 @@ import {
     createFollowUpTask as createFollowUpTaskService,
     getPatientFollowUpTasks
 } from "../patientCare.js";
+import {
+    getPreVisitBrief as getPreVisitBriefService,
+    getDoctorClinicalSummary as getDoctorClinicalSummaryService,
+    draftSoapClinicalNotes as draftSoapClinicalNotesService,
+    draftPrescriptionAssistance as draftPrescriptionAssistanceService,
+    getDoctorAuthorizedPatients as getDoctorAuthorizedPatientsService,
+    resolveDoctorPatientContext as resolveDoctorPatientContextService
+} from "../doctorCopilot.js";
 
 
 
@@ -540,7 +548,8 @@ export const TOOL_DEFINITIONS = {
         isWrite: false,
         execute: async (user, args = {}) => {
             const statusFilter = typeof args === "string" ? args : (args?.status || null);
-            return await getMyAppointmentsService(user.id || user._id, user.role, statusFilter);
+            const options = typeof args === "object" && args !== null ? args : {};
+            return await getMyAppointmentsService(user.id || user._id, user.role, statusFilter, options);
         }
     },
     createAppointmentHold: {
@@ -685,7 +694,30 @@ export const TOOL_DEFINITIONS = {
         allowedRoles: ["patient", "doctor"],
         isWrite: false,
         execute: async (user, args) => {
-            return await searchPatientDocuments({ user, query: args.query || args.prompt || "medical history", patientId: args.patientId, appointmentId: args.appointmentId });
+            return await searchPatientDocuments({
+                user,
+                query: args.query || args.prompt || "medical history",
+                patientId: args.patientId,
+                appointmentId: args.appointmentId,
+                recordId: args.recordId,
+                recordIds: args.recordIds
+            });
+        }
+    },
+    searchPatientDocuments: {
+        name: "searchPatientDocuments",
+        description: "Search user medical documents, records, and prescriptions Q&A using vector search and deterministic lexical fallback.",
+        allowedRoles: ["patient", "doctor", "admin", "super_admin"],
+        isWrite: false,
+        execute: async (user, args) => {
+            return await searchPatientDocuments({
+                user,
+                query: args.query || args.prompt || "medical history",
+                patientId: args.patientId,
+                appointmentId: args.appointmentId,
+                recordId: args.recordId,
+                recordIds: args.recordIds
+            });
         }
     },
     getMyMedicalRecords: {
@@ -940,75 +972,25 @@ export const TOOL_DEFINITIONS = {
         allowedRoles: ["doctor", "admin", "super_admin"],
         isWrite: false,
         execute: async (user, args = {}) => {
-            if (!args.appointmentId) {
-                throw new AppError(400, "appointmentId is required");
-            }
-            const appointment = await getAppointmentByIdService(args.appointmentId, user);
-            if (!appointment) {
-                throw new AppError(404, "Appointment not found");
-            }
-
-            // Enforce doctor/organization scope: Doctor can only access their assigned appointments
-            if (user.role === "doctor") {
-                const DoctorModel = (await import("../../model/doctor.js")).default;
-                const doc = await DoctorModel.findOne({ userId: user.id || user._id }).lean();
-                const apptDocId = String(appointment.doctorId?._id || appointment.doctorId);
-                if (!doc || apptDocId !== String(doc._id)) {
-                    throw new AppError(403, "Access denied. You are not assigned to this appointment.");
-                }
-            }
-
-            const patientId = appointment.patientId?._id || appointment.patientId;
-            let medicalRecords = [];
-            try {
-                medicalRecords = await getMedicalRecordsByAppointmentService(args.appointmentId, user.id, user.role);
-            } catch (e) {
-                medicalRecords = [];
-            }
-
-            let prescription = null;
-            try {
-                prescription = await getPrescriptionByAppointmentService(args.appointmentId, user.id, user.role);
-            } catch (e) {
-                prescription = null;
-            }
-
-            let documentChunks = [];
-            try {
-                const recordIds = medicalRecords.map(r => r._id);
-                if (recordIds.length > 0) {
-                    const DocumentChunkModel = (await import("../../model/documentChunk.js")).default;
-                    documentChunks = await DocumentChunkModel.find({ documentId: { $in: recordIds } }).limit(5).lean();
-                }
-            } catch (e) {
-                documentChunks = [];
-            }
-
-            const patientName = appointment.patientId?.userId?.name || appointment.patientId?.name || "Patient";
-            const chiefComplaint = appointment.reasonForVisit || appointment.reason || appointment.triageInfo?.chiefComplaint || "No chief complaint recorded";
-            
-            const recordsSummary = (medicalRecords && medicalRecords.length > 0)
-                ? medicalRecords.map(r => `• ${r.title} (${r.recordType}): ${r.description || 'No description'}`).join("\n")
-                : "No past medical records available";
-
-            const prescriptionSummary = prescription
-                ? `• Diagnosis: ${prescription.diagnosis || 'N/A'}\n• Medicines: ${(prescription.medicines || []).map(m => `${m.medicineName || m.name} (${m.dosage || 'N/A'}, ${m.frequency || 'N/A'})`).join(", ")}`
-                : "No active prescription records available";
-
-            const documentChunksSummary = (documentChunks && documentChunks.length > 0)
-                ? documentChunks.map((c, i) => `• [Scanned Record Chunk ${i + 1}]: ${c.textContent.substring(0, 150)}...`).join("\n")
-                : "No document chunks available";
-
-            return {
-                appointmentId: args.appointmentId,
-                patientName,
-                chiefComplaint,
-                medicalRecordsSummary: recordsSummary,
-                prescriptionSummary,
-                documentChunksSummary,
-                rawRecords: medicalRecords,
-                rawPrescription: prescription
-            };
+            return await getPreVisitBriefService(user, args);
+        }
+    },
+    getPreVisitBrief: {
+        name: "getPreVisitBrief",
+        description: "Generate a structured pre-visit clinical brief for doctor summarizing patient history, past consultations, active prescriptions, and follow-ups.",
+        allowedRoles: ["doctor", "admin", "super_admin"],
+        isWrite: false,
+        execute: async (user, args = {}) => {
+            return await getPreVisitBriefService(user, args);
+        }
+    },
+    getClinicalSummary: {
+        name: "getClinicalSummary",
+        description: "Generate a comprehensive clinical summary distinguishing recorded facts, timeline, active medications, open follow-ups, and missing documentation.",
+        allowedRoles: ["doctor", "admin", "super_admin"],
+        isWrite: false,
+        execute: async (user, args = {}) => {
+            return await getDoctorClinicalSummaryService(user, args);
         }
     },
     draftClinicalNotes: {
@@ -1017,81 +999,34 @@ export const TOOL_DEFINITIONS = {
         allowedRoles: ["doctor"],
         isWrite: false,
         execute: async (user, args = {}) => {
-            const appointmentId = args.appointmentId;
-            let appt = null;
-            if (appointmentId) {
-                try {
-                    appt = await getAppointmentByIdService(appointmentId, user);
-                } catch (e) {}
-            }
-
-            const patientName = appt?.patientId?.userId?.name || appt?.patientId?.name || args.patientName || "Patient";
-            const chiefComplaint = appt?.reasonForVisit || appt?.triageInfo?.chiefComplaint || args.symptoms || "Not documented in available context; requires physical examination by attending physician.";
-            const objectiveFindings = args.findings || args.examination || "Not documented in available context; requires physical examination and vitals measurement by attending physician.";
-            const assessment = args.diagnosis || args.assessment || (chiefComplaint !== "Not documented in available context; requires physical examination by attending physician." ? `Preliminary clinical consideration for: ${chiefComplaint}. Formal diagnosis pending physician evaluation.` : "Pending clinical examination and diagnostic assessment by attending physician.");
-            const plan = args.plan || "To be determined by attending physician based on in-person examination and clinical findings.";
-
-            const soapNote = {
-                subjective: `Patient ${patientName} presents with complaint: ${chiefComplaint}.`,
-                objective: objectiveFindings,
-                assessment: assessment,
-                plan: plan
-            };
-
-            const formattedSoap = `SOAP CLINICAL NOTE DRAFT (Requires Physician Review & Verification):\n• S (Subjective): ${soapNote.subjective}\n• O (Objective): ${soapNote.objective}\n• A (Assessment): ${soapNote.assessment}\n• P (Plan): ${soapNote.plan}`;
-
-            return {
-                isDraft: true,
-                approvalRequired: true,
-                responseType: "DRAFT_REQUIRING_REVIEW",
-                appointmentId: appointmentId || null,
-                patientName,
-                soapNote,
-                draftContent: formattedSoap,
-                disclaimer: "DRAFT ONLY: AI-generated SOAP notes must be reviewed, verified, and signed by the treating clinician before filing to the medical record. Do not treat as final."
-            };
+            return await draftSoapClinicalNotesService(user, args);
         }
     },
     draftPrescription: {
         name: "draftPrescription",
-        description: "Doctor copilot tool to assist with drafting prescription recommendations based on clinical evaluation.",
+        description: "Doctor copilot tool to assist with drafting prescription recommendations based on clinical evaluation with duplicate and allergy safety checks.",
         allowedRoles: ["doctor"],
         isWrite: false,
         execute: async (user, args = {}) => {
-            const diagnosis = args.diagnosis || "Pending clinical diagnosis by attending physician";
-            let medicines = [];
-            if (Array.isArray(args.medicines) && args.medicines.length > 0) {
-                medicines = args.medicines;
-            } else if (args.medicineName) {
-                medicines = [
-                    {
-                        medicineName: args.medicineName,
-                        dosage: args.dosage || "As directed by physician",
-                        frequency: args.frequency || "As directed by physician",
-                        duration: args.duration || "As directed by physician",
-                        instructions: args.instructions || "Take as directed by physician"
-                    }
-                ];
-            } else {
-                medicines = [
-                    {
-                        medicineName: "Medication selection must be determined by the attending physician based on clinical examination",
-                        dosage: "To be determined by physician",
-                        frequency: "To be determined by physician",
-                        duration: "To be determined by physician",
-                        instructions: "Requires attending physician prescription"
-                    }
-                ];
-            }
-
-            return {
-                isDraft: true,
-                approvalRequired: true,
-                responseType: "DRAFT_REQUIRING_REVIEW",
-                diagnosis,
-                medicines,
-                disclaimer: "DRAFT ONLY: Prescriptions must be reviewed, verified, and signed by a licensed physician before issuance. No automated medication dispensing permitted."
-            };
+            return await draftPrescriptionAssistanceService(user, args);
+        }
+    },
+    getDoctorAuthorizedPatients: {
+        name: "getDoctorAuthorizedPatients",
+        description: "Retrieve list of patients authorized for the authenticated doctor.",
+        allowedRoles: ["doctor", "admin", "super_admin"],
+        isWrite: false,
+        execute: async (user, args = {}) => {
+            return await getDoctorAuthorizedPatientsService(user, args);
+        }
+    },
+    lookupDoctorPatient: {
+        name: "lookupDoctorPatient",
+        description: "Resolve patient identity and appointment context for doctor workflow.",
+        allowedRoles: ["doctor", "admin", "super_admin"],
+        isWrite: false,
+        execute: async (user, args = {}) => {
+            return await resolveDoctorPatientContextService(user, args);
         }
     },
 
@@ -1154,7 +1089,8 @@ export const TOOL_DEFINITIONS = {
                 }
             }
 
-            const cacheKey = `${orgId || 'global'}:getClinicStats:${args.startDate || 'all'}:${args.endDate || 'all'}:${args.clinicWise ? 'wise' : 'summary'}`;
+            const groupByVal = args.groupBy || args.group_by || 'none';
+            const cacheKey = `${orgId || 'global'}:getClinicStats:${args.startDate || 'all'}:${args.endDate || 'all'}:${groupByVal}:${args.clinicWise ? 'wise' : 'summary'}`;
             const cached = getCachedStats(cacheKey);
             if (cached) return cached;
 
@@ -1875,5 +1811,56 @@ export const TOOL_DEFINITIONS = {
                 rejectionReason: args.rejectionReason
             });
         }
+    },
+
+    // Phase 5: Shared Medical Record Intelligence & Cross-Tenant Analytics
+    getSharedMedicalRecords: {
+        name: "getSharedMedicalRecords",
+        description: "Retrieve and list authorized shared medical records for active patient context without auto-selecting one. Doctor only.",
+        allowedRoles: ["doctor", "admin", "super_admin"],
+        isWrite: false,
+        execute: async (user, args = {}) => {
+            const { getDoctorSharedMedicalRecords } = await import("../doctorCopilot.js");
+            return await getDoctorSharedMedicalRecords(user, args);
+        }
+    },
+    selectSharedMedicalRecord: {
+        name: "selectSharedMedicalRecord",
+        description: "Select a shared medical record by index, ordinal, or 'all', and retrieve grounded clinical findings. Doctor only.",
+        allowedRoles: ["doctor", "admin", "super_admin"],
+        isWrite: false,
+        execute: async (user, args = {}) => {
+            const { resolveSharedRecordSelection } = await import("../doctorCopilot.js");
+            return await resolveSharedRecordSelection(user, args);
+        }
+    },
+    getDoctorAuthorizedPatients: {
+        name: "getDoctorAuthorizedPatients",
+        description: "Retrieve authorized patients for the authenticated doctor without exposing IDs.",
+        allowedRoles: ["doctor", "admin", "super_admin"],
+        isWrite: false,
+        execute: async (user, args = {}) => {
+            return await getDoctorAuthorizedPatientsService(user, args);
+        }
+    },
+    lookupDoctorPatient: {
+        name: "lookupDoctorPatient",
+        description: "Lookup authorized patient by name or ID for the authenticated doctor.",
+        allowedRoles: ["doctor", "admin", "super_admin"],
+        isWrite: false,
+        execute: async (user, args = {}) => {
+            return await resolveDoctorPatientContextService(user, args);
+        }
+    },
+    compareOrganizations: {
+        name: "compareOrganizations",
+        description: "Compare operational, clinical, and financial performance metrics between clinics/organizations using real database metrics. Super Admin only.",
+        allowedRoles: ["super_admin"],
+        isWrite: false,
+        execute: async (user, args = {}) => {
+            const { compareOrganizationsAnalytics } = await import("./analyticsService.js");
+            return await compareOrganizationsAnalytics(user, args);
+        }
     }
 };
+

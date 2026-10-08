@@ -178,9 +178,9 @@ const DoctorChat = () => {
             recipientId={adminConv.organizationAdminId || adminConv.adminObj?._id}
             currentUserId={user?._id || user?.id}
             currentRole="doctor"
-            participantName={adminConv.displayName}
-            participantSubtext={adminConv.displaySubtext}
-            participantImage={adminConv.profileImage}
+            participantName={user?.name || "Dr. K. Senthil Kumar"}
+            participantSubtext="Doctor"
+            participantImage={user ? resolveProfileImage(user) : null}
             showLiveStatus={false}
             onMessageSent={handleMessageSent}
             onBack={null}

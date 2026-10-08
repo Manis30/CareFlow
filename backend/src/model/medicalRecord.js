@@ -61,6 +61,27 @@ const medicalRecordSchema = new mongoose.Schema(
             resourceType: {
                 type: String,
                 default: "auto"
+            },
+            mimeType: {
+                type: String,
+                default: null
+            },
+            fileName: {
+                type: String,
+                default: null
+            },
+            fileExtension: {
+                type: String,
+                default: null
+            },
+            fileCategory: {
+                type: String,
+                enum: ["document", "image", "other"],
+                default: "document"
+            },
+            fileSize: {
+                type: Number,
+                default: 0
             }
         },
         visibility: {
@@ -80,12 +101,31 @@ const medicalRecordSchema = new mongoose.Schema(
                     default: Date.now
                 }
             }
-        ]
+        ],
+        extractedText: {
+            type: String,
+            default: null
+        },
+        ocrConfidence: {
+            type: Number,
+            default: null
+        },
+        ocrStatus: {
+            type: String,
+            enum: ["PENDING", "PROCESSING", "COMPLETED", "LOW_CONFIDENCE", "UNAVAILABLE"],
+            default: "PENDING"
+        }
     },
     {
-        timestamps: true
+        timestamps: true,
+        toJSON: { virtuals: true },
+        toObject: { virtuals: true }
     }
 );
+
+medicalRecordSchema.virtual("fileUrl").get(function () {
+    return this.file?.url;
+});
 
 medicalRecordSchema.index({ patientId: 1 });
 medicalRecordSchema.index({ "sharedWith.doctorId": 1 });

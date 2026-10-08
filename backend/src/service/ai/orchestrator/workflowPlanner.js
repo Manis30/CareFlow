@@ -79,7 +79,15 @@ const NON_BOOKING_INTENTS = new Set([
     "LOG_DOSE",
     "PROPOSE_MEDICATION_SCHEDULE",
     "CHECK_PRESCRIPTION_SAFETY",
-    "GET_DOCTORS"
+    "GET_DOCTORS",
+    "GET_SHARED_MEDICAL_RECORDS",
+    "SHARED_MEDICAL_RECORDS",
+    "SELECT_SHARED_RECORD",
+    "COMPARE_ORGANIZATIONS",
+    "GET_PRE_VISIT_BRIEF",
+    "GET_CLINICAL_SUMMARY",
+    "GET_DOCTOR_AUTHORIZED_PATIENTS",
+    "LOOKUP_DOCTOR_PATIENT"
 ]);
 
 const bookingGoal = (state, intent) => {
@@ -552,6 +560,46 @@ export const planWorkflowStep = async (
         }
     }
 
+    // Multi-Tool Flow 3: Admin multi-tool query (e.g. department stats + doctor workload) (Phase 5 Part B4)
+    const isAdminRole = user?.role === "admin" || user?.role === "organization_admin" || user?.role === "super_admin";
+    const isMultiAnalyticsQuery = isAdminRole &&
+        /\b(department|specialty)\b/i.test(promptMessage) &&
+        /\b(doctor|workload|handles?|busiest)\b/i.test(promptMessage) &&
+        !/\b(my doctor|my department)\b/i.test(promptMessage);
+
+    if (isMultiAnalyticsQuery) {
+        const hasDeptStep = trace.some(s =>
+            (s.toolName === "getClinicStats" || s.toolName === "getHealthcareAnalytics") &&
+            (s.args?.groupBy === "department" || s.args?.group_by === "department")
+        );
+        const hasDoctorStep = trace.some(s =>
+            (s.toolName === "getClinicStats" || s.toolName === "getHealthcareAnalytics") &&
+            (s.args?.groupBy === "doctor" || s.args?.group_by === "doctor")
+        );
+
+        if (!hasDeptStep) {
+            return {
+                action: "EXECUTE_TOOL",
+                toolName: "getClinicStats",
+                toolArgs: { ...extracted.toolArgs, groupBy: "department", prompt: promptMessage },
+                intent: "GET_CLINIC_STATS",
+                confidence: 0.95,
+                requiredCapabilities: ["getClinicStats"],
+                agentState: state
+            };
+        } else if (!hasDoctorStep) {
+            return {
+                action: "EXECUTE_TOOL",
+                toolName: "getClinicStats",
+                toolArgs: { ...extracted.toolArgs, groupBy: "doctor", prompt: promptMessage },
+                intent: "GET_CLINIC_STATS",
+                confidence: 0.95,
+                requiredCapabilities: [],
+                agentState: state
+            };
+        }
+    }
+
     // If summarizeAppointmentContext lacks appointmentId (e.g. no upcoming appointments):
     if (extracted.toolName === "summarizeAppointmentContext" && !extracted.toolArgs?.appointmentId) {
         return {
@@ -585,6 +633,7 @@ export const planWorkflowStep = async (
         // If additional capabilities were identified, check for the next unexecuted capability
         if (Array.isArray(extracted.requiredCapabilities) && extracted.requiredCapabilities.length > 0) {
             const nextUnexecuted = extracted.requiredCapabilities.find(cap => !trace.some(t => t.toolName === cap));
+            const finalAgentState = isBooking ? state : (state || (agentState?.goal !== "BOOK_APPOINTMENT" ? agentState : null));
             if (nextUnexecuted) {
                 return {
                     action: "EXECUTE_TOOL",
@@ -593,22 +642,24 @@ export const planWorkflowStep = async (
                     intent: extracted.intent,
                     confidence: extracted.confidence,
                     modelUsed: extracted.modelUsed,
-                    agentState: state
+                    agentState: finalAgentState
                 };
             }
         }
 
         // All required capabilities executed -> ready for grounded synthesis
+        const finalAgentState = isBooking ? state : (state || (agentState?.goal !== "BOOK_APPOINTMENT" ? agentState : null));
         return {
             action: "RESPOND",
             responseType: "LIVE_DATA",
             intent: extracted.intent,
             confidence: extracted.confidence,
             modelUsed: extracted.modelUsed,
-            agentState: state
+            agentState: finalAgentState
         };
     }
 
+    const finalAgentState = isBooking ? state : (state || (agentState?.goal !== "BOOK_APPOINTMENT" ? agentState : null));
     return {
         action: "EXECUTE_TOOL",
         toolName: extracted.toolName,
@@ -619,6 +670,6 @@ export const planWorkflowStep = async (
         missingRequiredFields: extracted.missingRequiredFields || [],
         clarify: extracted.clarify || false,
         clarificationQuestion: extracted.clarificationQuestion || null,
-        agentState: state
+        agentState: finalAgentState
     };
 };

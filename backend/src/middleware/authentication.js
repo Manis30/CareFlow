@@ -3,7 +3,9 @@ import UserModel from '../model/user.js';
 
 const authentication = async (req, res, next) => {
     try {
-        const { accessToken: token } = req.cookies;
+        const token = req.cookies?.accessToken ||
+            (req.headers?.authorization?.startsWith('Bearer ') ? req.headers.authorization.split(' ')[1] : null) ||
+            req.query?.token;
         if (!token) {
             return res.status(401).json({ success: false, message: "Access token required" });
         }
