@@ -451,9 +451,91 @@ export const extractIntent = async (
     // timeouts/cooldown failures on deterministic discovery requests.
     // ─────────────────────────────────────────────────────────────────
     if (role === "doctor") {
+        // Extract patient name if explicitly mentioned in query
+        const extractDoctorPatient = (text) => {
+            if (!text) return null;
+            const clean = String(text).trim();
+            const patterns = [
+                /(?:what\s+is|what\s+are|tell\s+me\s+about|give\s+me|summarize|show|view|get|list|find|about)\s+([A-Za-z.\s]+?)'s/i,
+                /([A-Za-z.\s]+?)'s\s+(?:(?:full|complete|past|latest|active|current|shared|recent)\s+)*(?:chart|records?|medical\s+records?|history|results|tests|prescriptions|medications?|medicines?|notes|consultation|vitals)/i,
+                /(?:patient|chart\s+(?:for|of)|records?\s+(?:for|of)|look\s*up\s+patient|about\s+patient)\s+([A-Za-z.\s]+?)(?:'s|\s+on|\s+at|\s+for|\s+records?|\s+reports?|\s+documents?|\s+history|\s+tomorrow|\s+today|\?|$)/i,
+                /(?:show|view|get|list|find)\s+([A-Za-z.\s]+?)'s\s+(?:records?|shared\s+records?|documents?|reports?)/i
+            ];
+            for (const pat of patterns) {
+                const m = clean.match(pat);
+                if (m && m[1]) {
+                    let candidate = m[1].trim();
+                    candidate = candidate.replace(/^(?:the\s+|my\s+|this\s+|that\s+)?patient(?:\s+|$)/i, '').trim();
+                    const generic = new Set(["my", "the", "a", "an", "all", "any", "this", "that", "shared", "medical", "patient", "patients", "the patient", "this patient", "record", "records", "report", "reports", "document", "documents", "information", "history"]);
+                    if (candidate.length > 1 && !generic.has(candidate.toLowerCase())) {
+                        return candidate;
+                    }
+                }
+            }
+            return null;
+        };
+
+        const extractedDoctorPatient = extractDoctorPatient(promptMessage);
+
+        // If a specific patient is named and the doctor asks for their records/history/documents/medications:
+        if (extractedDoctorPatient) {
+            const mentionsMeds = /\b(medications?|prescriptions?|medicines?|drugs?|dosage|doses?)\b/i.test(pLower);
+            const mentionsHistoryOrConsult = /\b(history|consultation|consultations|notes|summary|overview|visit|visits|vitals)\b/i.test(pLower);
+            const mentionsRecords = /\b(records?|reports?|documents?|files?|shared\s+records?|shared)\b/i.test(pLower);
+
+            const isMultiPartClinical = (mentionsMeds && (mentionsHistoryOrConsult || mentionsRecords)) ||
+                (mentionsHistoryOrConsult && mentionsRecords && /\b(all|and|full|complete|comprehensive|both)\b/i.test(pLower)) ||
+                /\b(full\s+history|clinical\s+summary|patient\s+summary|comprehensive|longitudinal|everything\s+about)\b/i.test(pLower);
+
+            if (isMultiPartClinical) {
+                return {
+                    intent: "GET_CLINICAL_SUMMARY",
+                    toolName: "getClinicalSummary",
+                    toolArgs: {
+                        patientName: extractedDoctorPatient,
+                        query: promptMessage
+                    },
+                    missingRequiredFields: [],
+                    requiredCapabilities: mentionsRecords ? ["getSharedMedicalRecords"] : [],
+                    confidence: 0.98,
+                    modelUsed: "deterministic_rules"
+                };
+            }
+
+            if (mentionsRecords && !mentionsHistoryOrConsult && !mentionsMeds) {
+                return {
+                    intent: "GET_SHARED_MEDICAL_RECORDS",
+                    toolName: "getSharedMedicalRecords",
+                    toolArgs: {
+                        patientName: extractedDoctorPatient,
+                        query: promptMessage
+                    },
+                    missingRequiredFields: [],
+                    requiredCapabilities: [],
+                    confidence: 0.98,
+                    modelUsed: "deterministic_rules"
+                };
+            }
+
+            if (mentionsHistoryOrConsult || mentionsMeds) {
+                return {
+                    intent: "GET_CLINICAL_SUMMARY",
+                    toolName: "getClinicalSummary",
+                    toolArgs: {
+                        patientName: extractedDoctorPatient,
+                        query: promptMessage
+                    },
+                    missingRequiredFields: [],
+                    requiredCapabilities: [],
+                    confidence: 0.98,
+                    modelUsed: "deterministic_rules"
+                };
+            }
+        }
+
         // 1. Doctor Patient Discovery (Phase 7):
-        // Generic discovery queries when NO active patient context exists
-        const isPatientRecordsDiscovery = (
+        // Generic discovery queries when NO active patient context exists AND NO specific patient named
+        const isPatientRecordsDiscovery = !extractedDoctorPatient && (
             /^(?:what\s+can\s+you\s+tell\s+me\s+about\s+)?patient\s+(?:records?|information|history)\??$/i.test(pLower) ||
             /^(?:show|list|view|my)\s+(?:patient\s+records?|patients?|patient\s+information|patient\s+history)\??$/i.test(pLower) ||
             /\b(?:patient\s+records?|show\s+my\s+patients|my\s+patients|patient\s+information|patient\s+history)\b/i.test(pLower)
@@ -798,38 +880,71 @@ export const extractIntent = async (
     // Phase 5: Broad Shared Medical Record Discovery Routing & Patient Discovery (Doctor Role)
     // "What can you tell me about Patient Records?", "Show me the shared medical records.", etc.
     if (role === "doctor") {
-        // Deterministic Doctor Patient Discovery (Phase 7 Fix):
-        // Generic discovery queries when NO active patient context exists
-        const isPatientRecordsDiscovery = (
-            /^(?:what\s+can\s+you\s+tell\s+me\s+about\s+)?patient\s+records?\??$/i.test(pLower.trim()) ||
-            (/\b(show|list|view|what|tell\s+me)\b/i.test(pLower) && /\b(patient\s+records?|my\s+patients|patient\s+information|patient\s+history)\b/i.test(pLower)) ||
-            /^(show\s+patient\s+records|show\s+my\s+patients|my\s+patient\s+records|patient\s+information|patient\s+history|what\s+can\s+you\s+tell\s+me\s+about\s+patient\s+records|patient\s+records)$/i.test(pLower.trim())
-        );
+        const extractDoctorPatientPost = (text) => {
+            if (!text) return null;
+            const clean = String(text).trim();
+            const patterns = [
+                /(?:patient|chart\s+(?:for|of)|records?\s+(?:for|of)|look\s*up\s+patient|about\s+patient)\s+([A-Za-z.\s]+?)(?:'s|\s+on|\s+at|\s+for|\s+records?|\s+reports?|\s+documents?|\s+history|\s+tomorrow|\s+today|\?|$)/i,
+                /([A-Za-z.\s]+?)'s\s+(?:chart|records?|medical\s+records?|record|history|results|tests|prescriptions|notes|hba1c|vitals)/i,
+                /(?:show|view|get|list|find)\s+([A-Za-z.\s]+?)'s\s+(?:records?|shared\s+records?|documents?|reports?)/i
+            ];
+            for (const pat of patterns) {
+                const m = clean.match(pat);
+                if (m && m[1]) {
+                    const candidate = m[1].trim();
+                    const generic = new Set(["my", "the", "a", "an", "all", "any", "this", "shared", "medical", "patient", "patients", "record", "records", "information", "history"]);
+                    if (candidate.length > 1 && !generic.has(candidate.toLowerCase())) {
+                        return candidate;
+                    }
+                }
+            }
+            return null;
+        };
 
-        if (isPatientRecordsDiscovery && !agentState?.patientId) {
-            toolName = "getDoctorAuthorizedPatients";
-            intent = "GET_DOCTOR_AUTHORIZED_PATIENTS";
-            confidence = 0.98;
-            missingRequiredFields = [];
-            toolArgs = {};
-        }
-
-        const isBroadSharedRecord = (
-            (/\b(show|list|view|what|tell\s+me|find|get)\b/i.test(pLower) &&
-             /\b(shared\s+(?:medical\s+)?records?|shared\s+reports?|shared\s+documents?)\b/i.test(pLower)) ||
-            /^(show\s+(?:all\s+)?shared\s+records|show\s+shared\s+medical\s+records|what\s+shared\s+medical\s+records\s+does\s+this\s+patient\s+have|tell\s+me\s+something\s+about\s+the\s+shared\s+medical\s+records|show\s+me\s+the\s+shared\s+medical\s+records|show\s+me\s+this\s+patient'?s?\s+shared\s+medical\s+records)$/i.test(pLower.trim())
-        );
-
-        // Do not intercept if doctor is asking a specific document search question (e.g. "what does the shared record say about diabetes")
-        const isSpecificSearchQuery = /\b(what does (?:it|the record|the report) say about|does the patient have|search for|hba1c|blood pressure|vitals|creatinine)\b/i.test(pLower);
-
-        if ((isBroadSharedRecord || (isPatientRecordsDiscovery && agentState?.patientId)) && !isSpecificSearchQuery) {
+        const postPatientName = extractDoctorPatientPost(promptMessage);
+        if (postPatientName && /\b(records?|reports?|documents?|chart|history|shared|notes)\b/i.test(pLower)) {
             toolName = "getSharedMedicalRecords";
             intent = "GET_SHARED_MEDICAL_RECORDS";
             confidence = 0.98;
             missingRequiredFields = [];
-            if (agentState?.patientId) {
-                toolArgs.patientId = agentState.patientId;
+            toolArgs = {
+                patientName: postPatientName,
+                query: promptMessage
+            };
+        } else {
+            // Deterministic Doctor Patient Discovery (Phase 7 Fix):
+            // Generic discovery queries when NO active patient context exists
+            const isPatientRecordsDiscovery = !postPatientName && (
+                /^(?:what\s+can\s+you\s+tell\s+me\s+about\s+)?patient\s+records?\??$/i.test(pLower.trim()) ||
+                (/\b(show|list|view|what|tell\s+me)\b/i.test(pLower) && /\b(patient\s+records?|my\s+patients|patient\s+information|patient\s+history)\b/i.test(pLower)) ||
+                /^(show\s+patient\s+records|show\s+my\s+patients|my\s+patient\s+records|patient\s+information|patient\s+history|what\s+can\s+you\s+tell\s+me\s+about\s+patient\s+records|patient\s+records)$/i.test(pLower.trim())
+            );
+
+            if (isPatientRecordsDiscovery && !agentState?.patientId) {
+                toolName = "getDoctorAuthorizedPatients";
+                intent = "GET_DOCTOR_AUTHORIZED_PATIENTS";
+                confidence = 0.98;
+                missingRequiredFields = [];
+                toolArgs = {};
+            }
+
+            const isBroadSharedRecord = (
+                (/\b(show|list|view|what|tell\s+me|find|get)\b/i.test(pLower) &&
+                 /\b(shared\s+(?:medical\s+)?records?|shared\s+reports?|shared\s+documents?)\b/i.test(pLower)) ||
+                /^(show\s+(?:all\s+)?shared\s+records|show\s+shared\s+medical\s+records|what\s+shared\s+medical\s+records\s+does\s+this\s+patient\s+have|tell\s+me\s+something\s+about\s+the\s+shared\s+medical\s+records|show\s+me\s+the\s+shared\s+medical\s+records|show\s+me\s+this\s+patient'?s?\s+shared\s+medical\s+records)$/i.test(pLower.trim())
+            );
+
+            // Do not intercept if doctor is asking a specific document search question (e.g. "what does the shared record say about diabetes")
+            const isSpecificSearchQuery = /\b(what does (?:it|the record|the report) say about|does the patient have|search for|hba1c|blood pressure|vitals|creatinine)\b/i.test(pLower);
+
+            if ((isBroadSharedRecord || (isPatientRecordsDiscovery && agentState?.patientId)) && !isSpecificSearchQuery) {
+                toolName = "getSharedMedicalRecords";
+                intent = "GET_SHARED_MEDICAL_RECORDS";
+                confidence = 0.98;
+                missingRequiredFields = [];
+                if (agentState?.patientId) {
+                    toolArgs.patientId = agentState.patientId;
+                }
             }
         }
     }
@@ -1014,6 +1129,12 @@ export const extractIntent = async (
         ...missingRequiredFields,
         ...(entityResolution.missingRequiredFields || [])
     ]));
+
+    // Any field that is actually provided with a non-empty value in toolArgs is NOT missing!
+    resolvedMissing = resolvedMissing.filter(f => {
+        const val = toolArgs[f];
+        return val === undefined || val === null || val === "";
+    });
 
     // If symptoms are provided, symptoms is NOT missing!
     if (toolArgs.symptoms) {

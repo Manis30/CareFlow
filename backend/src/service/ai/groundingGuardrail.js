@@ -54,7 +54,10 @@ const PARAPHRASE_WHITELIST = new Set([
     "syndrome", "chronic", "essential", "primary", "secondary", "moderate", "severe", "mild",
     "fictional", "synthetic", "female", "male", "routine", "reported", "encounter", "concise",
     "follow-up", "followup", "substance", "reaction", "severity", "loinc", "ref", "reference",
-    "flag", "flags", "unit", "units", "range", "onset", "route", "frequency"
+    "flag", "flags", "unit", "units", "range", "onset", "route", "frequency",
+    "title", "date", "dates", "value", "values", "conclusion", "conclusions", "impression", "impressions", "indication", "indications", "evaluation",
+    "lipoprotein", "lipoproteins",
+    "past", "current", "latest", "prior", "previous", "historical", "present", "documented", "undocumented", "missing", "unknown", "none", "available", "authorized", "recorded"
 ]);
 
 export const checkGroundingGuardrail = (generatedText, contextData) => {
@@ -94,8 +97,10 @@ export const checkGroundingGuardrail = (generatedText, contextData) => {
     }
 
     // 3. Check ISO/Explicit Dates in generatedText
+    const todayStr = new Date().toISOString().split('T')[0];
     const genDates = generatedText.match(/\b\d{4}-\d{2}-\d{2}\b/g) || [];
     for (const dateStr of genDates) {
+        if (dateStr === todayStr) continue;
         if (!contextStr.includes(dateStr.toLowerCase())) {
             ungroundedItems.push(`Date '${dateStr}'`);
         }

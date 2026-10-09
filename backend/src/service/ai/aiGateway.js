@@ -49,7 +49,9 @@ export const PURE_DATA_TOOLS = [
     "searchPatientDocuments",
     "searchMyDocuments",
     "getDoctorAuthorizedPatients",
-    "lookupDoctorPatient"
+    "lookupDoctorPatient",
+    "getClinicalSummary",
+    "getPreVisitBrief"
 ];
 
 const ORDINALS = ["First", "Second", "Third", "Fourth", "Fifth"];
@@ -329,11 +331,16 @@ export const templatePureDataResponse = (toolName, result, userRole = null, args
     }
 
     if (result && typeof result === "object") {
+        if (result.formattedSummary) return result.formattedSummary;
+        if (result.summaryText) return result.summaryText;
         if (result.message) return result.message;
         if (result.summary) return result.summary;
         if (result.description) return result.description;
         if (result.aiResponse) return result.aiResponse;
+        if (result.draftContent) return result.draftContent;
         if (result.error) return `Operation notice: ${result.error}`;
+        if (result.data && typeof result.data === "string") return result.data;
+        return "";
     }
 
     return String(result || "Operation completed successfully.");

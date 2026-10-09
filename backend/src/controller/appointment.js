@@ -74,7 +74,9 @@ export const getMyAppointmentsController = async (
 
     const result = await getMyAppointmentsService(
         req.user.id,
-        req.query.status
+        req.user.role,
+        req.query.status,
+        req.query
     );
 
     res.status(200).json({
@@ -132,7 +134,8 @@ export const getDoctorTodayAppointmentsController = async (
 
     const result =
         await getDoctorTodayAppointmentsService(
-            req.user.id
+            req.user.id,
+            req.query
         );
 
     res.status(200).json({
@@ -151,7 +154,8 @@ export const getDoctorUpcomingAppointmentsController = async (
 
     const result =
         await getDoctorUpcomingAppointmentsService(
-            req.user.id
+            req.user.id,
+            req.query
         );
 
     res.status(200).json({
@@ -169,7 +173,8 @@ export const getDoctorCompletedAppointmentsController = async (
 
     const result =
         await getDoctorCompletedAppointmentsService(
-            req.user.id
+            req.user.id,
+            req.query
         );
 
     res.status(200).json({
@@ -188,7 +193,8 @@ export const getDoctorCancelledAppointmentsController = async (
 
     const result =
         await getDoctorCancelledAppointmentsService(
-            req.user.id
+            req.user.id,
+            req.query
         );
 
     res.status(200).json({

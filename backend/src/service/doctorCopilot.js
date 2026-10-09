@@ -70,8 +70,12 @@ export const getDoctorAuthorizedPatients = async (doctorUser, filter = {}) => {
 
     // 2. Distinct patient IDs from shared medical records
     const sharedRecordPatientIds = await MedicalRecordModel.find({
-        organizationId: orgId,
-        "sharedWith.doctorId": doctor._id
+        "sharedWith.doctorId": doctor._id,
+        $or: [
+            { organizationId: orgId },
+            { organizationId: null },
+            { organizationId: { $exists: false } }
+        ]
     }).distinct("patientId");
 
     const allAuthorizedPatientIds = Array.from(new Set([
@@ -198,7 +202,7 @@ export const resolveDoctorPatientSelection = async (doctorUser, { selection, pro
         if (matches.length === 1) {
             resolvedPatient = matches[0];
         } else if (matches.length > 1) {
-            // Ambiguous names (Section 6): Disambiguate with human-readable appointment dates
+            // Ambiguous names (Section 5): Disambiguate with human-readable attributes
             const patientIds = matches.map(m => m.patientId);
             const appts = await AppointmentModel.find({
                 doctorId: doctor._id,
@@ -210,18 +214,30 @@ export const resolveDoctorPatientSelection = async (doctorUser, { selection, pro
             for (const a of appts) {
                 const pid = String(a.patientId);
                 if (!apptMap.has(pid)) {
-                    const dStr = a.appointmentDate ? new Date(a.appointmentDate).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "recent";
+                    const dStr = a.appointmentDate ? new Date(a.appointmentDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "recent";
                     apptMap.set(pid, dStr);
                 }
             }
 
-            const formattedChoices = matches.map((m, idx) => {
-                const apptInfo = apptMap.get(m.patientId);
-                const suffix = apptInfo ? ` — ${apptInfo} appointment` : "";
-                return `${idx + 1}. ${m.name}${suffix}`;
-            }).join("\n");
+            const choiceLines = matches.map((m, idx) => {
+                const details = [];
+                if (m.dateOfBirth) {
+                    const dob = new Date(m.dateOfBirth);
+                    const birthYear = dob.getFullYear();
+                    const age = Math.floor((Date.now() - dob.getTime()) / (365.25 * 24 * 60 * 60 * 1000));
+                    details.push(`b. ${birthYear}, age ${age}`);
+                }
+                const apptInfo = apptMap.get(String(m.patientId));
+                if (apptInfo) details.push(`last visit: ${apptInfo}`);
+                const detailStr = details.length > 0 ? ` (${details.join(" · ")})` : "";
+                return `${idx + 1}. ${m.name}${detailStr}`;
+            });
 
-            const ambiguityMsg = `I found ${matches.length} patients matching ${cleanName || selText}:\n\n${formattedChoices}\n\nWhich one would you like to review?`;
+            const uniqueChoices = new Set(choiceLines.map(l => l.replace(/^\d+\.\s*/, '').trim()));
+            let ambiguityMsg = `I found ${matches.length} patients matching "${cleanName || selText}":\n\n${choiceLines.join("\n")}\n\nWhich patient would you like to review? Please reply with a number (1-${matches.length}).`;
+            if (uniqueChoices.size < matches.length) {
+                ambiguityMsg = `I found ${matches.length} patients matching "${cleanName || selText}" with identical recorded attributes:\n\n${choiceLines.join("\n")}\n\nPlease provide another identifying detail (such as a visit date or contact detail) to select the correct patient.`;
+            }
 
             return {
                 handled: true,
@@ -231,6 +247,7 @@ export const resolveDoctorPatientSelection = async (doctorUser, { selection, pro
                 agentState: {
                     ...agentState,
                     stage: "SELECT_PATIENT",
+                    pendingGoal: agentState.pendingGoal || "SHARED_RECORDS",
                     authorizedPatients: matches
                 }
             };
@@ -264,9 +281,16 @@ export const resolveDoctorPatientSelection = async (doctorUser, { selection, pro
         authorizedPatients: authorized
     };
 
-    // If the doctor simultaneously asked for shared records:
+    // If the doctor asked for shared records or was in the middle of a record discovery flow:
     const wantsSharedRecords = /\b(shared\s+(?:medical\s+)?records?|records?|reports?|documents?)\b/i.test(selLower);
-    if (wantsSharedRecords && !selLower.match(/^\s*(?:\d+|first|second|third|fourth|fifth|[a-z\s]+)\s*$/i)) {
+    const isJustSelection = /^\s*(?:\d+|first|second|third|fourth|fifth)\s*$/i.test(selLower) ||
+        selLower.trim() === resolvedPatient.name.toLowerCase().trim();
+    const hadPendingRecordRequest = agentState?.pendingGoal === "SHARED_RECORDS" ||
+        agentState?.requestedAction === "records" ||
+        agentState?.goal === "SHARED_RECORDS" ||
+        /\b(records?|reports?|documents?|shared)\b/i.test(String(agentState?.originalPrompt || agentState?.rawPrompt || ""));
+
+    if ((wantsSharedRecords && !isJustSelection) || (isJustSelection && hadPendingRecordRequest)) {
         const sharedRecordsResult = await getDoctorSharedMedicalRecords(doctorUser, {
             patientId: resolvedPatient.patientId,
             agentState: nextState
@@ -394,8 +418,12 @@ export const resolveDoctorPatientContext = async (doctorUser, params = {}) => {
         });
         const hasShared = await MedicalRecordModel.exists({
             patientId: targetPatientId,
-            organizationId: orgId,
-            "sharedWith.doctorId": doctor._id
+            "sharedWith.doctorId": doctor._id,
+            $or: [
+                { organizationId: orgId },
+                { organizationId: null },
+                { organizationId: { $exists: false } }
+            ]
         });
 
         if (!hasAppt && !hasShared) {
@@ -439,10 +467,17 @@ export const resolveDoctorPatientContext = async (doctorUser, params = {}) => {
     let searchName = params.patientName || null;
     if (!searchName && (params.rawPrompt || params.prompt || params.query)) {
         const text = String(params.rawPrompt || params.prompt || params.query);
-        const nameMatch = text.match(/(?:patient|chart\s+(?:for|of)|records\s+(?:for|of)|look\s+up\s+patient)\s+([A-Za-z.\s]+?)(?:\s+on|\s+at|\s+for|\s+tomorrow|\s+today|'s|\?|$)/i) ||
-                          text.match(/([A-Za-z.\s]+?)'s\s+(?:chart|records|record|history|results|tests|prescriptions|notes|hba1c|vitals)/i);
+        const nameMatch = text.match(/(?:what\s+is|what\s+are|tell\s+me\s+about|give\s+me|summarize|show|view|get|list|find|about)\s+([A-Za-z.\s]+?)'s/i) ||
+                          text.match(/([A-Za-z.\s]+?)'s\s+(?:(?:full|complete|past|latest|active|current|shared|recent)\s+)*(?:chart|records?|medical\s+records?|history|results|tests|prescriptions|medications?|medicines?|notes|consultation|vitals)/i) ||
+                          text.match(/(?:patient|chart\s+(?:for|of)|records?\s+(?:for|of)|look\s*up\s+patient|about\s+patient)\s+([A-Za-z.\s]+?)(?:'s|\s+on|\s+at|\s+for|\s+records?|\s+reports?|\s+documents?|\s+history|\s+tomorrow|\s+today|\?|$)/i) ||
+                          text.match(/(?:show|view|get|list|find)\s+([A-Za-z.\s]+?)'s\s+(?:records?|shared\s+records?|documents?|reports?)/i);
         if (nameMatch && nameMatch[1].trim().length > 1) {
-            searchName = nameMatch[1].trim();
+            let candidate = nameMatch[1].trim();
+            candidate = candidate.replace(/^(?:the\s+|my\s+|this\s+|that\s+)?patient(?:\s+|$)/i, '').trim();
+            const generic = new Set(["my", "the", "a", "an", "all", "any", "this", "that", "shared", "medical", "patient", "patients", "the patient", "this patient", "record", "records", "report", "reports", "document", "documents", "information", "history"]);
+            if (candidate.length > 1 && !generic.has(candidate.toLowerCase())) {
+                searchName = candidate;
+            }
         }
     }
 
@@ -461,14 +496,51 @@ export const resolveDoctorPatientContext = async (doctorUser, params = {}) => {
         }
 
         if (matches.length > 1) {
-            const choices = matches.map((p, i) => `${i + 1}. ${p.name} (ID: ${p.patientId.slice(-6)})`).join("\n");
+            const patientIds = matches.map(m => m.patientId);
+            const appts = await AppointmentModel.find({
+                doctorId: doctor._id,
+                organizationId: orgId,
+                patientId: { $in: patientIds }
+            }).sort({ appointmentDate: -1 }).lean();
+
+            const apptMap = new Map();
+            for (const a of appts) {
+                const pid = String(a.patientId);
+                if (!apptMap.has(pid)) {
+                    const dStr = a.appointmentDate ? new Date(a.appointmentDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "recent";
+                    apptMap.set(pid, dStr);
+                }
+            }
+
+            const choiceLines = matches.map((p, i) => {
+                const details = [];
+                if (p.dateOfBirth) {
+                    const dob = new Date(p.dateOfBirth);
+                    const birthYear = dob.getFullYear();
+                    const age = Math.floor((Date.now() - dob.getTime()) / (365.25 * 24 * 60 * 60 * 1000));
+                    details.push(`b. ${birthYear}, age ${age}`);
+                } else if (p.gender && p.gender !== "Not specified") {
+                    details.push(p.gender);
+                }
+                const lastAppt = apptMap.get(String(p.patientId));
+                if (lastAppt) details.push(`last visit: ${lastAppt}`);
+                const detailStr = details.length > 0 ? ` (${details.join(" · ")})` : "";
+                return `${i + 1}. ${p.name}${detailStr}`;
+            });
+
+            const uniqueChoices = new Set(choiceLines.map(l => l.replace(/^\d+\.\s*/, '').trim()));
+            let clarQuestion = `I found ${matches.length} patients matching "${searchName}":\n\n${choiceLines.join("\n")}\n\nPlease select which patient to view by replying with their number.`;
+            if (uniqueChoices.size < matches.length) {
+                clarQuestion = `I found ${matches.length} patients matching "${searchName}" with identical recorded attributes:\n\n${choiceLines.join("\n")}\n\nPlease provide another identifying detail (such as a visit date or contact detail) to select the correct patient.`;
+            }
+
             return {
                 patient: null,
                 appointment: null,
                 isAmbiguous: true,
                 notFound: false,
                 matches,
-                clarificationQuestion: `I found ${matches.length} patients matching "${searchName}":\n${choices}\nPlease select which patient to view.`
+                clarificationQuestion: clarQuestion
             };
         }
 
@@ -703,10 +775,43 @@ export const getDoctorClinicalSummary = async (doctorUser, params = {}) => {
     if (!doctor) throw new AppError(404, "Doctor profile not found");
     const orgId = doctor.organizationId?._id || doctor.organizationId;
 
-    let targetPatientId = params.patientId || null;
+    let targetPatientId = params.patientId || params.agentState?.patientId || null;
+    let targetPatientName = params.agentState?.patientName || null;
     if (params.appointmentId) {
         const appt = await AppointmentModel.findById(params.appointmentId).lean();
         if (appt) targetPatientId = String(appt.patientId?._id || appt.patientId);
+    }
+
+    if (!targetPatientId) {
+        const resolved = await resolveDoctorPatientContext(doctorUser, {
+            patientName: params.patientName,
+            query: params.query || params.prompt || "",
+            agentState: params.agentState
+        });
+        if (resolved?.patient?.patientId) {
+            targetPatientId = resolved.patient.patientId;
+            targetPatientName = resolved.patient.name;
+        } else if (resolved?.isAmbiguous) {
+            return {
+                success: false,
+                isAmbiguous: true,
+                message: resolved.clarificationQuestion,
+                response: resolved.clarificationQuestion,
+                agentState: {
+                    ...(params.agentState || {}),
+                    stage: "SELECT_PATIENT",
+                    authorizedPatients: resolved.matches
+                }
+            };
+        } else if (resolved?.notFound) {
+            return {
+                success: false,
+                notFound: true,
+                message: resolved.message || "Patient not found in your authorized clinic records.",
+                response: resolved.message || "Patient not found in your authorized clinic records.",
+                agentState: params.agentState || {}
+            };
+        }
     }
 
     if (!targetPatientId) {
@@ -721,8 +826,12 @@ export const getDoctorClinicalSummary = async (doctorUser, params = {}) => {
     });
     const hasShared = await MedicalRecordModel.exists({
         patientId: targetPatientId,
-        organizationId: orgId,
-        "sharedWith.doctorId": doctor._id
+        "sharedWith.doctorId": doctor._id,
+        $or: [
+            { organizationId: orgId },
+            { organizationId: null },
+            { organizationId: { $exists: false } }
+        ]
     });
     if (!hasAppt && !hasShared) {
         throw new AppError(403, "Doctor is not authorized to access clinical summary for this patient");
@@ -756,90 +865,132 @@ export const getDoctorClinicalSummary = async (doctorUser, params = {}) => {
         status: "PENDING"
     }).sort({ followUpDate: 1 }).lean();
 
-    // 1. Facts / Recorded Findings
+    // 1. Current Findings & Latest Consultation
+    const latestAppt = appointments[0] || null;
+    let latestConsultationText = "None on record";
+    if (latestAppt) {
+        const apptDateStr = new Date(latestAppt.appointmentDate).toISOString().split('T')[0];
+        const apptReason = latestAppt.reason || latestAppt.reasonForVisit || 'General Consultation';
+        const notes = latestAppt.doctorNotes || latestAppt.clinicalNotes || latestAppt.triageInfo?.chiefComplaint || 'None documented';
+        latestConsultationText = `${apptDateStr} (${latestAppt.status}) — Reason: ${apptReason}. Clinical notes: ${notes}`;
+    }
+
+    const currentMedications = [];
+    for (const p of prescriptions) {
+        const rxDate = p.createdAt ? new Date(p.createdAt).toISOString().split('T')[0] : 'N/A';
+        for (const m of (p.medicines || [])) {
+            const medDesc = `${m.medicineName} (${m.dosage || 'standard'}, ${m.frequency || 'as directed'})`;
+            currentMedications.push(`[${rxDate} Prescription] ${medDesc}${m.instructions ? ` — Directions: ${m.instructions}` : ''}`);
+        }
+    }
+
+    // 2. Documented Facts & Verified Diagnoses
     const facts = [];
     const diagnoses = Array.from(new Set(prescriptions.map(p => p.diagnosis).filter(Boolean)));
     if (diagnoses.length > 0) {
-        facts.push(`Recorded Diagnoses: ${diagnoses.join(", ")}`);
+        facts.push(`Documented Diagnoses: ${diagnoses.join(", ")}`);
     } else {
-        facts.push("Recorded Diagnoses: None documented in available prescriptions");
+        facts.push("Documented Diagnoses: None documented in available prescriptions");
     }
     if (Array.isArray(patient.allergies) && patient.allergies.length > 0) {
-        facts.push(`Verified Allergies: ${patient.allergies.join(", ")}`);
+        facts.push(`Allergies: ${patient.allergies.join(", ")}`);
     } else {
-        facts.push("Verified Allergies: None recorded");
+        facts.push("Allergies: No known drug allergies documented");
+    }
+    if (patient.bloodGroup) {
+        facts.push(`Blood Group: ${patient.bloodGroup}`);
     }
 
-    // 2. Timeline
+    // 3. Historical Consultations & Timeline
     const timeline = [];
     for (const appt of appointments) {
+        const dateStr = new Date(appt.appointmentDate).toISOString().split('T')[0];
         timeline.push({
             date: appt.appointmentDate,
-            event: `Consultation (${appt.status}): ${appt.reason || appt.reasonForVisit || 'General'}`
+            citation: `[${dateStr} Consultation]`,
+            event: `${appt.status.toUpperCase()} — ${appt.reason || appt.reasonForVisit || 'General'}`
         });
     }
     for (const p of prescriptions) {
+        const dateStr = new Date(p.createdAt).toISOString().split('T')[0];
         timeline.push({
             date: p.createdAt,
-            event: `Prescription issued for: ${p.diagnosis}`
+            citation: `[${dateStr} Prescription]`,
+            event: `Prescription issued for ${p.diagnosis}`
         });
     }
     for (const r of records) {
+        const dateStr = r.createdAt ? new Date(r.createdAt).toISOString().split('T')[0] : 'N/A';
         timeline.push({
-            date: r.createdAt,
-            event: `Medical Record uploaded: ${r.title} (${r.recordType})`
+            date: r.createdAt || new Date(),
+            citation: `[${dateStr} Medical Record: ${r.title}]`,
+            event: `Record Type: ${r.recordType}`
         });
     }
     timeline.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
-    // 3. Current Medications
-    const currentMedications = [];
-    for (const p of prescriptions) {
-        for (const m of (p.medicines || [])) {
-            currentMedications.push(`${m.medicineName} (${m.dosage || 'standard'}, ${m.frequency || 'as directed'})`);
-        }
-    }
+    // 4. Authorized Shared Medical Records
+    const sharedRecords = records.map(r => {
+        const dateStr = r.createdAt ? new Date(r.createdAt).toISOString().split('T')[0] : 'N/A';
+        return `[${dateStr}] ${r.title} (${r.recordType})`;
+    });
 
-    // 4. Open Follow-up Items
+    // 5. Open Follow-up Items
     const openFollowUps = followUps.map(f =>
         `Due ${new Date(f.followUpDate).toISOString().split('T')[0]}: ${f.reason}`
     );
 
-    // 5. Unknown / Not Documented
+    // 6. Unknown / Missing Documentation Gaps (Strict Grounding)
     const unknownOrNotDocumented = [
         "In-clinic vitals (Blood pressure, pulse, temperature, respiratory rate) are not documented in available records; requires in-person measurement.",
-        "Recent lab blood panels not explicitly attached in shared records."
+        "Recent laboratory blood panels not explicitly attached in shared records."
     ];
-    if (!patient.bloodGroup) unknownOrNotDocumented.push("Blood group not documented.");
+    if (!patient.bloodGroup) {
+        unknownOrNotDocumented.push("Blood group: Not documented in available records.");
+    }
+
+    const citations = [
+        ...appointments.slice(0, 5).map(a => `Consultation (${new Date(a.appointmentDate).toISOString().split('T')[0]})`),
+        ...prescriptions.map(p => `Prescription (${new Date(p.createdAt).toISOString().split('T')[0]})`),
+        ...records.map(r => `Medical Record: ${r.title} (${r.createdAt ? new Date(r.createdAt).toISOString().split('T')[0] : 'N/A'})`)
+    ];
 
     const formattedSummary = [
         `CLINICAL SUMMARY: ${patient.userId?.name || 'Patient'}`,
         "",
-        "1. FACTS & RECORDED FINDINGS:",
-        ...facts.map(f => `• ${f}`),
+        "1. LATEST CONSULTATION:",
+        `• ${latestConsultationText}`,
         "",
-        `2. TIMELINE (${timeline.length} events):`,
-        ...(timeline.length > 0 ? timeline.slice(0, 5).map(t => `• ${new Date(t.date).toISOString().split('T')[0]}: ${t.event}`) : ["• No timeline events recorded"]),
-        "",
-        `3. CURRENT MEDICATIONS (${currentMedications.length}):`,
+        `2. ACTIVE MEDICATIONS (${currentMedications.length}):`,
         ...(currentMedications.length > 0 ? currentMedications.map(m => `• ${m}`) : ["• No active medications recorded"]),
         "",
-        `4. OPEN FOLLOW-UP ITEMS (${openFollowUps.length}):`,
-        ...(openFollowUps.length > 0 ? openFollowUps.map(o => `• ${o}`) : ["• None"]),
+        "3. DOCUMENTED CLINICAL FACTS:",
+        ...facts.map(f => `• ${f}`),
         "",
-        "5. UNKNOWN / NOT DOCUMENTED:",
+        `4. HISTORICAL TIMELINE (${timeline.length} events):`,
+        ...(timeline.length > 0 ? timeline.slice(0, 5).map(t => `• ${new Date(t.date).toISOString().split('T')[0]}: ${t.event}`) : ["• No timeline events recorded"]),
+        "",
+        `5. AUTHORIZED MEDICAL RECORDS (${sharedRecords.length}):`,
+        ...(sharedRecords.length > 0 ? sharedRecords.map(r => `• ${r}`) : ["• No shared medical records available"]),
+        "",
+        "6. MISSING INFORMATION & CLINICAL GAPS:",
         ...unknownOrNotDocumented.map(u => `• ${u}`)
     ].join("\n");
 
     return {
-        patientId: targetPatientId,
+        success: true,
+        patientId: String(targetPatientId),
         patientName: patient.userId?.name || "Patient",
+        latestConsultation: latestConsultationText,
         facts,
         timeline,
         currentMedications,
+        sharedRecords,
         openFollowUps,
         unknownOrNotDocumented,
+        citations: Array.from(new Set(citations)),
         formattedSummary,
+        response: formattedSummary,
         responseType: "ANSWER"
     };
 };
@@ -1277,13 +1428,38 @@ export const getDoctorSharedMedicalRecords = async (doctorUser, params = {}) => 
     const orgId = doctor.organizationId?._id || doctor.organizationId;
 
     let targetPatientId = params.patientId || params.agentState?.patientId || null;
+    let targetPatientName = params.agentState?.patientName || null;
     if (!targetPatientId) {
         const resolved = await resolveDoctorPatientContext(doctorUser, {
+            patientName: params.patientName,
             query: params.query || params.prompt || "",
             agentState: params.agentState
         });
         if (resolved?.patient?.patientId) {
             targetPatientId = resolved.patient.patientId;
+            targetPatientName = resolved.patient.name;
+        } else if (resolved?.isAmbiguous) {
+            return {
+                success: false,
+                isAmbiguous: true,
+                message: resolved.clarificationQuestion,
+                response: resolved.clarificationQuestion,
+                records: [],
+                agentState: {
+                    ...(params.agentState || {}),
+                    stage: "SELECT_PATIENT",
+                    authorizedPatients: resolved.matches
+                }
+            };
+        } else if (resolved?.notFound && (params.patientName || params.query)) {
+            return {
+                success: false,
+                notFound: true,
+                message: resolved.message || "Patient not found in your authorized clinic records.",
+                response: resolved.message || "Patient not found in your authorized clinic records.",
+                records: [],
+                agentState: params.agentState || {}
+            };
         }
     }
 
@@ -1317,20 +1493,26 @@ export const getDoctorSharedMedicalRecords = async (doctorUser, params = {}) => 
     });
 
     if (records.length === 0) {
+        const noRecMsg = targetPatientName
+            ? `I couldn't find any shared medical records for ${targetPatientName} available to you.`
+            : "I couldn't find any shared medical records for this patient available to you.";
         return {
             success: true,
             records: [],
             patientId: String(targetPatientId),
-            message: "I couldn't find any shared medical records for this patient available to you.",
+            message: noRecMsg,
+            response: noRecMsg,
             agentState: {
                 ...(params.agentState || {}),
-                patientId: String(targetPatientId)
+                stage: "PATIENT_SELECTED",
+                patientId: String(targetPatientId),
+                ...(targetPatientName ? { patientName: targetPatientName } : {})
             }
         };
     }
 
     const numberedItems = records.map((r, i) => `${i + 1}. ${r.title} — ${r.date}`).join("\n");
-    const promptResponse = `I found ${records.length} shared medical record${records.length > 1 ? "s" : ""}:\n\n${numberedItems}\n\nWhich one would you like me to review?\nYou can choose a number or say 'all'.`;
+    const promptResponse = `I found ${records.length} shared medical record${records.length > 1 ? "s" : ""}${targetPatientName ? ` for ${targetPatientName}` : ""}:\n\n${numberedItems}\n\nWhich one would you like me to review?\nYou can choose a number or say 'all'.`;
 
     return {
         success: true,
@@ -1342,6 +1524,7 @@ export const getDoctorSharedMedicalRecords = async (doctorUser, params = {}) => 
             ...(params.agentState || {}),
             stage: "SELECT_SHARED_RECORD",
             patientId: String(targetPatientId),
+            ...(targetPatientName ? { patientName: targetPatientName } : {}),
             sharedMedicalRecords: records
         }
     };
@@ -1353,11 +1536,33 @@ export const getDoctorSharedMedicalRecords = async (doctorUser, params = {}) => 
  * Executes searchPatientDocuments scoped strictly to the selected record or all authorized records.
  */
 export const resolveSharedRecordSelection = async (doctorUser, { selection, query, agentState = {} } = {}) => {
-    const records = Array.isArray(agentState?.sharedMedicalRecords) 
+    let records = Array.isArray(agentState?.sharedMedicalRecords) 
         ? agentState.sharedMedicalRecords 
         : (Array.isArray(agentState?.sharedRecords) ? agentState.sharedRecords : []);
+
+    if (records.length === 0 && agentState?.patientId) {
+        try {
+            const refetch = await getDoctorSharedMedicalRecords(doctorUser, {
+                patientId: agentState.patientId,
+                agentState
+            });
+            if (refetch?.records && refetch.records.length > 0) {
+                records = refetch.records;
+            }
+        } catch (_) { }
+    }
+
     if (records.length === 0) {
-        return { handled: false };
+        return {
+            handled: true,
+            aiResponse: "The shared medical records for this patient are no longer accessible or have been updated. Please ask to show the patient's records again to refresh the list.",
+            searchResult: { answer: "Records no longer accessible." },
+            citations: [],
+            agentState: {
+                ...agentState,
+                stage: "PATIENT_SELECTED"
+            }
+        };
     }
 
     const selText = String(selection || query || "").trim();
@@ -1373,7 +1578,7 @@ export const resolveSharedRecordSelection = async (doctorUser, { selection, quer
             user: doctorUser,
             query: searchQuery,
             patientId: agentState.patientId,
-            recordIds: records.map(r => r.id)
+            recordIds: records.map(r => r.id || r._id)
         });
 
         return {
@@ -1409,18 +1614,19 @@ export const resolveSharedRecordSelection = async (doctorUser, { selection, quer
 
     // Also match by record title (e.g. "MRI Report")
     if (targetIdx === -1) {
-        const titleMatch = records.findIndex(r => r.title.toLowerCase().includes(selLower) || selLower.includes(r.title.toLowerCase()));
+        const titleMatch = records.findIndex(r => (r.title || "").toLowerCase().includes(selLower) || selLower.includes((r.title || "").toLowerCase()));
         if (titleMatch !== -1) targetIdx = titleMatch;
     }
 
     if (targetIdx >= 0 && targetIdx < records.length) {
         const chosen = records[targetIdx];
+        const recordIdentifier = String(chosen.id || chosen._id);
         const searchQuery = query && query !== selText ? query : `Summarize medical record: ${chosen.title}`;
         const searchResult = await searchPatientDocuments({
             user: doctorUser,
             query: searchQuery,
             patientId: agentState.patientId,
-            recordId: chosen.id
+            recordId: recordIdentifier
         });
 
         return {
@@ -1434,8 +1640,22 @@ export const resolveSharedRecordSelection = async (doctorUser, { selection, quer
             agentState: {
                 ...agentState,
                 stage: "RECORD_SELECTED",
-                selectedRecordId: chosen.id,
+                selectedRecordId: recordIdentifier,
                 selectedRecordTitle: chosen.title
+            }
+        };
+    }
+
+    // If in SELECT_SHARED_RECORD stage and doctor entered an invalid number or unrecognized choice:
+    if (/^(?:\d+|record \d+|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth)$/i.test(selLower)) {
+        return {
+            handled: true,
+            aiResponse: `Please select a valid record number between 1 and ${records.length}, or reply 'all' to review all records.`,
+            searchResult: { answer: "Invalid record index." },
+            citations: [],
+            agentState: {
+                ...agentState,
+                stage: "SELECT_SHARED_RECORD"
             }
         };
     }

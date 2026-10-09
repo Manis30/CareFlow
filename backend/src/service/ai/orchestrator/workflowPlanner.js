@@ -622,6 +622,17 @@ export const planWorkflowStep = async (
         };
     }
 
+    // If the latest executed tool requires clarification (e.g. ambiguous patient name or consultation choice):
+    const lastTraceStep = trace[trace.length - 1];
+    if (lastTraceStep?.result?.isAmbiguous || lastTraceStep?.result?.needsSelection) {
+        return {
+            action: "RESPOND",
+            responseType: "CLARIFICATION",
+            aiResponse: lastTraceStep.result.clarificationQuestion || lastTraceStep.result.message || lastTraceStep.result.response,
+            agentState: lastTraceStep.result.agentState || state
+        };
+    }
+
     // Check if the planned tool was already executed with equivalent arguments
     const isAlreadyRun = trace.some(step =>
         step.toolName === extracted.toolName &&
@@ -635,10 +646,15 @@ export const planWorkflowStep = async (
             const nextUnexecuted = extracted.requiredCapabilities.find(cap => !trace.some(t => t.toolName === cap));
             const finalAgentState = isBooking ? state : (state || (agentState?.goal !== "BOOK_APPOINTMENT" ? agentState : null));
             if (nextUnexecuted) {
+                const nextArgs = {
+                    ...(extracted.toolArgs || {}),
+                    ...(state?.patientId ? { patientId: state.patientId } : {}),
+                    ...(state?.patientName ? { patientName: state.patientName } : {})
+                };
                 return {
                     action: "EXECUTE_TOOL",
                     toolName: nextUnexecuted,
-                    toolArgs: extracted.toolArgs || {},
+                    toolArgs: nextArgs,
                     intent: extracted.intent,
                     confidence: extracted.confidence,
                     modelUsed: extracted.modelUsed,

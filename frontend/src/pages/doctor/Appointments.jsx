@@ -272,19 +272,43 @@ export const DoctorAppointments = () => {
             />
           </div>
 
-          <div className="flex items-center gap-2 text-xs">
-            <span className="text-slate-400 font-semibold flex items-center gap-1">
-              <Filter className="w-3.5 h-3.5" /> Channel:
-            </span>
-            <select
-              value={channelFilter}
-              onChange={(e) => setChannelFilter(e.target.value)}
-              className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-700 focus:outline-none focus:border-blue-500 cursor-pointer"
+          <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-lg text-xs font-semibold">
+            <button
+              type="button"
+              id="filter-channel-all"
+              onClick={() => setChannelFilter('all')}
+              className={`px-3 py-1.5 rounded-md transition-all cursor-pointer ${
+                channelFilter === 'all'
+                  ? 'bg-white text-blue-600 shadow-2xs font-bold'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
             >
-              <option value="all">All Channels</option>
-              <option value="online">Online Video Only</option>
-              <option value="offline">In-Clinic Only</option>
-            </select>
+              All
+            </button>
+            <button
+              type="button"
+              id="filter-channel-online"
+              onClick={() => setChannelFilter('online')}
+              className={`px-3 py-1.5 rounded-md transition-all cursor-pointer flex items-center gap-1 ${
+                channelFilter === 'online'
+                  ? 'bg-white text-blue-600 shadow-2xs font-bold'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Video className="w-3.5 h-3.5" /> Online
+            </button>
+            <button
+              type="button"
+              id="filter-channel-in-clinic"
+              onClick={() => setChannelFilter('offline')}
+              className={`px-3 py-1.5 rounded-md transition-all cursor-pointer flex items-center gap-1 ${
+                channelFilter === 'offline'
+                  ? 'bg-white text-blue-600 shadow-2xs font-bold'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <MapPin className="w-3.5 h-3.5" /> In-Clinic
+            </button>
           </div>
         </div>
       </div>
@@ -303,7 +327,12 @@ export const DoctorAppointments = () => {
               const isLast = idx === paginatedItems.length - 1;
 
               return (
-                <div key={appt._id} className="flex items-start gap-3 sm:gap-5 group">
+                <div
+                  key={appt._id}
+                  data-testid="appointment-row"
+                  data-channel={appt.consultationType}
+                  className="flex items-start gap-3 sm:gap-5 group"
+                >
                   {/* Time / Date Indicator Column */}
                   <div className="w-20 sm:w-24 shrink-0 text-right pt-3 font-sans hidden sm:block">
                     <span className="text-xs font-bold text-slate-900 block truncate">

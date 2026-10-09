@@ -11,7 +11,7 @@ const aiChatMessageSchema = new mongoose.Schema({
         required: true
     },
     citations: [{
-        type: String
+        type: mongoose.Schema.Types.Mixed
     }],
     toolCallsUsed: [{
         toolName: String,

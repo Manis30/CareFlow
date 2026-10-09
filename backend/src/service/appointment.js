@@ -804,123 +804,108 @@ export const cancelAppointmentService = async (
 
 
 export const getDoctorTodayAppointmentsService = async (
-    userId
+    userId,
+    query = {}
 ) => {
-    console.log(userId, 'checl   ')
     const doctor = await getDoctorByUserId(userId);
-    console.log('doctor data check', doctor)
     if (!doctor) {
-
-        throw new AppError(
-            404,
-            "Doctor profile not found"
-        );
+        throw new AppError(404, "Doctor profile not found");
     }
-
 
     const today = new Date();
-
     today.setHours(0, 0, 0, 0);
 
-
     const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
 
-    tomorrow.setDate(
-        tomorrow.getDate() + 1
-    );
-
-
-    return await getAppointmentsByDoctorId(
-        doctor._id,
-        {
-            appointmentDate: {
-                $gte: today,
-                $lt: tomorrow
-            }
+    const filter = {
+        appointmentDate: {
+            $gte: today,
+            $lt: tomorrow
         }
-    );
-};
+    };
 
+    // Filter by status: Exclude cancelled appointments by default so counts are not inflated!
+    if (query.status) {
+        filter.status = query.status;
+    } else {
+        filter.status = { $nin: ["cancelled", "CANCELLED"] };
+    }
+
+    if (query.consultationType && query.consultationType !== "all") {
+        filter.consultationType = query.consultationType;
+    }
+
+    return await getAppointmentsByDoctorId(doctor._id, filter);
+};
 
 export const getDoctorUpcomingAppointmentsService = async (
-    userId
+    userId,
+    query = {}
 ) => {
-
     const doctor = await getDoctorByUserId(userId);
-
     if (!doctor) {
-
-        throw new AppError(
-            404,
-            "Doctor profile not found"
-        );
+        throw new AppError(404, "Doctor profile not found");
     }
 
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
 
-    const tomorrow = new Date();
+    const filter = {
+        appointmentDate: {
+            $gte: today
+        },
+        status: { $in: ["BOOKED", "CONFIRMED", "booked", "confirmed", "in_progress", "IN_PROGRESS"] }
+    };
 
-    tomorrow.setHours(0, 0, 0, 0);
+    if (query.status) {
+        filter.status = query.status;
+    }
+    if (query.consultationType && query.consultationType !== "all") {
+        filter.consultationType = query.consultationType;
+    }
 
-    tomorrow.setDate(
-        tomorrow.getDate() + 1
-    );
-
-
-    return await getAppointmentsByDoctorId(
-        doctor._id,
-        {
-            appointmentDate: {
-                $gte: tomorrow
-            },
-            status: { $in: ["BOOKED", "CONFIRMED", "booked", "confirmed"] }
-        }
-    );
+    return await getAppointmentsByDoctorId(doctor._id, filter);
 };
-
 
 export const getDoctorCompletedAppointmentsService = async (
-    userId
+    userId,
+    query = {}
 ) => {
-
     const doctor = await getDoctorByUserId(userId);
-
     if (!doctor) {
-
-        throw new AppError(
-            404,
-            "Doctor profile not found"
-        );
+        throw new AppError(404, "Doctor profile not found");
     }
 
-    return await getAppointmentsByDoctorId(
-        doctor._id,
-        {
-            status: { $in: ["COMPLETED", "completed"] }
-        }
-    );
+    const filter = {
+        status: { $in: ["COMPLETED", "completed"] }
+    };
+
+    if (query.consultationType && query.consultationType !== "all") {
+        filter.consultationType = query.consultationType;
+    }
+
+    return await getAppointmentsByDoctorId(doctor._id, filter);
 };
 
-
 export const getDoctorCancelledAppointmentsService = async (
-    userId
+    userId,
+    query = {}
 ) => {
-
     const doctor = await getDoctorByUserId(userId);
-
     if (!doctor) {
-
-        throw new AppError(
-            404,
-            "Doctor profile not found"
-        );
+        throw new AppError(404, "Doctor profile not found");
     }
 
-    return await getAppointmentsByDoctorId(
-        doctor._id,
-        {
-            status: { $in: ["CANCELLED", "cancelled"] }
-        }
-    );
+    const filter = {
+        status: { $in: ["CANCELLED", "cancelled"] }
+    };
+
+    if (query.consultationType && query.consultationType !== "all") {
+        filter.consultationType = query.consultationType;
+    }
+
+    return await getAppointmentsByDoctorId(doctor._id, filter);
 };
 
 export const cancelAppointmentByDoctorService = async (
